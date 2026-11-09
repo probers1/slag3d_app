@@ -30,7 +30,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { ModelFile, CollectionItem } from '../types';
-import { apiFetch, getStoredToken } from '../utils/api';
+import { apiFetch, apiSaveThumbnail } from '../utils/api';
 
 interface ModelDetail {
   id: string;
@@ -329,13 +329,8 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
 
     const ext = activeFile.original_name.split('.').pop()?.toLowerCase();
 
-    const storedAuthToken = getStoredToken();
-
     if (ext === 'stl') {
       const loader = new STLLoader();
-      if (storedAuthToken) {
-        loader.setRequestHeader({ Authorization: `Bearer ${storedAuthToken}` });
-      }
       loader.load(
         activeFile.file_path,
         (geometry) => {
@@ -351,9 +346,6 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       );
     } else if (ext === 'obj') {
       const loader = new OBJLoader();
-      if (storedAuthToken) {
-        loader.setRequestHeader({ Authorization: `Bearer ${storedAuthToken}` });
-      }
       loader.load(
         activeFile.file_path,
         (obj) => {
@@ -372,9 +364,6 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       );
     } else if (ext === '3mf') {
       const loader = new ThreeMFLoader();
-      if (storedAuthToken) {
-        loader.setRequestHeader({ Authorization: `Bearer ${storedAuthToken}` });
-      }
       loader.load(
         activeFile.file_path,
         (group) => {
@@ -449,13 +438,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       rendererRef.current.render(sceneRef.current, cameraRef.current);
       const dataUrl = rendererRef.current.domElement.toDataURL('image/png');
 
-      const res = await apiFetch(`/api/models/${model.id}/thumbnail-client`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: dataUrl }),
-      });
-
-      if (!res.ok) throw new Error('Failed to save thumbnail');
+      await apiSaveThumbnail(model.id, dataUrl);
 
       setSaveToast('Custom thumbnail angle saved successfully!');
       onModelUpdated();

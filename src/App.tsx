@@ -1,20 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Search, Filter, RefreshCw, X, Folder, Upload, ChevronLeft, ChevronRight, Layers, Tag } from 'lucide-react';
-import { User, ModelItem, CollectionItem, TagItem } from './types';
+import { Search, RefreshCw, X, Folder, Upload, ChevronLeft, ChevronRight, Layers, Tag } from 'lucide-react';
+import { ModelItem, CollectionItem, TagItem } from './types';
 import { Navbar } from './components/Navbar';
 import { ModelCard } from './components/ModelCard';
 import { CollectionsDrawer } from './components/CollectionsDrawer';
 import { UploadModal } from './components/UploadModal';
-import { AdminModal } from './components/AdminModal';
-import { ChangePasswordModal } from './components/ChangePasswordModal';
-import { LoginModal } from './components/LoginModal';
 import { ModelViewerModal } from './components/ModelViewerModal';
-import { apiFetch, getStoredToken, setStoredToken, setStoredUser, getStoredCsrfToken, setStoredCsrfToken } from './utils/api';
+import { apiFetch } from './utils/api';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [authChecked, setAuthChecked] = useState(false);
-
   // Filter and pagination state
   const [activeTab, setActiveTab] = useState<'all' | 'mine' | 'favorites' | 'collections'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,66 +26,20 @@ export default function App() {
 
   // Modals state
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
-
-  // Check auth status on mount
-  const checkAuth = async () => {
-    try {
-      const res = await apiFetch('/api/auth/me');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) {
-          const userWithId = { ...data.user, id: String(data.user?.id || '') };
-          setCurrentUser(userWithId);
-          setStoredUser(userWithId);
-          // Ensure double-submit CSRF token is synchronized in localStorage
-          if (!getStoredCsrfToken()) {
-            try {
-              const csrfRes = await apiFetch('/api/auth/csrf-token');
-              if (csrfRes.ok) {
-                const csrfData = await csrfRes.json();
-                if (csrfData.csrfToken) {
-                  setStoredCsrfToken(csrfData.csrfToken);
-                }
-              }
-            } catch {}
-          }
-          setAuthChecked(true);
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn('[SLAG3D] Auth check failed, showing login prompt:', err);
-    }
-
-    // Set authenticated state as false if no valid session found
-    setAuthChecked(true); // Mark auth check complete so we render the proper UI
-  };
-
-  useEffect(() => {
-    checkAuth();
-  }, []);
 
   // Fetch Collections list
   const fetchCollections = useCallback(async () => {
-    if (!currentUser) return;
     try {
       const res = await apiFetch('/api/collections');
       if (res.ok) {
         const data = await res.json();
         setCollections(data.collections || []);
-      } else if (res.status === 401) {
-        // Session expired - re-check auth
-        console.warn('[SLAG3D] Collections fetch returned 401');
-        checkAuth();
       }
     } catch (err) {
       console.error('Error fetching collections:', err);
     }
-  }, [currentUser]);
+  }, []);
 
   // Fetch Tags list
   const fetchTags = useCallback(async () => {
@@ -100,10 +48,6 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setTags(data.tags || []);
-      } else if (res.status === 401) {
-        // Session expired - re-check auth  
-        console.warn('[SLAG3D] Tags fetch returned 401');
-        checkAuth();
       }
     } catch (err) {
       console.error('Error fetching tags:', err);
@@ -112,7 +56,6 @@ export default function App() {
 
   // Fetch Models with filters
   const fetchModels = useCallback(async () => {
-    if (!currentUser) return;
     setLoadingModels(true);
     try {
       const params = new URLSearchParams({
@@ -130,25 +73,18 @@ export default function App() {
         const data = await res.json();
         setModels(data.models || []);
         setPagination(data.pagination || { total: 0, page: 1, limit: itemsPerPage, totalPages: 1 });
-      } else if (res.status === 401) {
-        // Session expired or token invalid - re-check auth and show login prompt if needed
-        console.warn('[SLAG3D] Model fetch returned 401 - session may have expired');
-        checkAuth();
       }
     } catch (err) {
       console.error('Error fetching models:', err);
     } finally {
       setLoadingModels(false);
     }
-  }, [currentUser, activeTab, searchQuery, selectedTag, selectedCollectionId, currentPage, itemsPerPage]);
+  }, [activeTab, searchQuery, selectedTag, selectedCollectionId, currentPage, itemsPerPage]);
 
   useEffect(() => {
-    if (currentUser) {
-      fetchCollections();
-      fetchTags();
-      // fetchModels is now handled inside the hook
-    }
-  }, [currentUser, fetchCollections, fetchTags]);
+    fetchCollections();
+    fetchTags();
+  }, [fetchCollections, fetchTags]);
 
   // Fetch models whenever filters, pagination, or user context change
   useEffect(() => {
@@ -192,20 +128,6 @@ export default function App() {
       }
     } catch (err) {
       console.error('Failed to trigger re-render:', err);
-    }
-  };
-
-  // Logout handler
-  const handleLogout = async () => {
-    try {
-      await apiFetch('/api/auth/logout', { method: 'POST' });
-      setStoredToken(null);
-      setStoredUser(null);
-      setStoredCsrfToken(null);
-      setCurrentUser(null);
-      setModels([]);
-    } catch (err) {
-      console.error('Logout error:', err);
     }
   };
 
@@ -258,50 +180,17 @@ export default function App() {
     }
   };
 
-  if (!authChecked) {
-    return (
-      <div className="min-h-screen bg-[#121214] flex items-center justify-center text-neutral-400">
-        <RefreshCw className="w-8 h-8 animate-spin text-blue-500" />
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-[#121214] text-neutral-100 flex flex-col font-['DM_Sans',sans-serif] selection:bg-blue-600 selection:text-white">
       {/* Top Navigation Bar */}
       <Navbar
-        user={currentUser}
         activeTab={activeTab}
         onTabChange={handleTabChange}
         onOpenUpload={() => setIsUploadOpen(true)}
-        onOpenAdmin={() => setIsAdminOpen(true)}
-        onOpenPasswordModal={() => setIsPasswordModalOpen(true)}
-        onLogout={handleLogout}
-        onOpenLogin={() => setIsLoginOpen(true)}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 flex flex-col gap-6">
-        {!currentUser ? (
-          <div className="my-auto py-16 flex flex-col items-center justify-center text-center">
-            <div className="w-16 h-16 rounded-2xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 mb-4">
-              <Layers className="w-8 h-8" />
-            </div>
-            <h1 className="text-2xl font-bold text-white mb-2 font-['Plus_Jakarta_Sans',sans-serif]">
-              Welcome to SLAG3D
-            </h1>
-            <p className="text-sm text-neutral-400 max-w-md mb-6">
-              Your self-hosted 3D printer asset vault with automated 512×512 headless renders, slicing mesh analytics, and hierarchical collections.
-            </p>
-            <button
-              onClick={() => setIsLoginOpen(true)}
-              className="px-6 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-lg shadow-blue-600/25 transition-all"
-            >
-              Sign In to Access Vault
-            </button>
-          </div>
-        ) : (
-          <>
             {/* Top Filter and Search Bar */}
             <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 bg-[#191920] border border-[#292934] p-3 rounded-2xl">
               {/* Search input */}
@@ -527,8 +416,6 @@ export default function App() {
                 )}
               </div>
             </div>
-          </>
-        )}
       </main>
 
       {/* Upload Modal */}
@@ -543,50 +430,16 @@ export default function App() {
         />
       )}
 
-      {/* Admin Panel Modal */}
-      {isAdminOpen && currentUser && (
-        <AdminModal
-          currentUserId={currentUser.id}
-          onClose={() => setIsAdminOpen(false)}
-        />
-      )}
 
-      {/* Change Password Modal */}
-      {isPasswordModalOpen && (
-        <ChangePasswordModal onClose={() => setIsPasswordModalOpen(false)} />
-      )}
-
-      {/* Sign In Modal */}
-      {isLoginOpen && (
-        <LoginModal
-          onLoginSuccess={(user) => {
-            setCurrentUser(user);
-            setAuthChecked(true);
-            setIsLoginOpen(false);
-
-            // Fetch data after brief timeout to ensure login completes first
-            setTimeout(async () => {
-              await fetchModels();
-              await fetchTags();
-              await fetchCollections();
-            }, 50);
-          }}
-          onClose={() => setIsLoginOpen(false)}
-        />
-      )}
 
       {/* 3D Model Viewer Modal */}
       {selectedModelId && (
         <ModelViewerModal
           modelId={selectedModelId}
           collections={collections}
-          currentUserId={currentUser?.id}
-          isAdmin={currentUser?.role === 'admin'}
           onClose={() => setSelectedModelId(null)}
           onModelUpdated={() => {
-            // Model was updated/uploaded - refresh specific view data only
             fetchModels();
-            // Tags and collections don't change when model is selected for viewing
           }}
         />
       )}

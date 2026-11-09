@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js';
-import { apiFetch, getStoredToken } from './api';
+import { apiSaveThumbnail } from './api';
 
 // Cache of model IDs currently being processed client-side to prevent duplicates
 const renderingQueue = new Set<string>();
@@ -76,18 +76,9 @@ export async function renderThumbnailInBrowser(
 
       const dataUrl = canvas.toDataURL('image/png');
 
-      // Upload rendered thumbnail to server
-      const res = await apiFetch(`/api/models/${modelId}/thumbnail-client`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: dataUrl }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (onComplete && data.thumbnail_path) {
-          onComplete(data.thumbnail_path);
-        }
+      const { thumbnail_path } = await apiSaveThumbnail(modelId, dataUrl);
+      if (onComplete && thumbnail_path) {
+        onComplete(thumbnail_path);
       }
 
       // Cleanup
@@ -95,13 +86,8 @@ export async function renderThumbnailInBrowser(
       material.dispose();
     };
 
-    const storedAuthToken = getStoredToken();
-
     if (ext === 'stl') {
       const loader = new STLLoader();
-      if (storedAuthToken) {
-        loader.setRequestHeader({ Authorization: `Bearer ${storedAuthToken}` });
-      }
       const geometry = await loader.loadAsync(filePath);
       geometry.computeVertexNormals();
       const mesh = new THREE.Mesh(geometry, material);
@@ -109,9 +95,6 @@ export async function renderThumbnailInBrowser(
       geometry.dispose();
     } else if (ext === 'obj') {
       const loader = new OBJLoader();
-      if (storedAuthToken) {
-        loader.setRequestHeader({ Authorization: `Bearer ${storedAuthToken}` });
-      }
       const obj = await loader.loadAsync(filePath);
       obj.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {
@@ -121,9 +104,6 @@ export async function renderThumbnailInBrowser(
       await fitAndRender(obj);
     } else if (ext === '3mf') {
       const loader = new ThreeMFLoader();
-      if (storedAuthToken) {
-        loader.setRequestHeader({ Authorization: `Bearer ${storedAuthToken}` });
-      }
       const group = await loader.loadAsync(filePath);
       group.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {

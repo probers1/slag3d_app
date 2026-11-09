@@ -1,97 +1,190 @@
-const TOKEN_KEY = 'slag3d_auth_token';
-const USER_KEY = 'slag3d_user';
-const CSRF_TOKEN_KEY = 'slag3d_csrf_token';
+import { invoke } from '@tauri-apps/api/core';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
-export function getStoredToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
+function mapAssetPaths(value: any): any {
+  if (typeof value === 'string') {
+    return value.replace(/^\/uploads\//, 'slag3d-asset://uploads/');
   }
-}
-
-export function setStoredToken(token: string | null) {
-  try {
-    if (token) {
-      localStorage.setItem(TOKEN_KEY, token);
-    } else {
-      localStorage.removeItem(TOKEN_KEY);
+  if (Array.isArray(value)) {
+    return value.map(mapAssetPaths);
+  }
+  if (value && typeof value === 'object') {
+    const out: any = {};
+    for (const k in value) {
+      out[k] = mapAssetPaths(value[k]);
     }
-  } catch {}
+    return out;
+  }
+  return value;
 }
 
-export function setStoredUser<T>(user: T | null) {
+export async function apiGetModels(params: {
+  page: number;
+  limit: number;
+  search?: string;
+  tag?: string | null;
+  collectionId?: string | null;
+  filter?: string;
+}) {
+  const data = await invoke<any>('get_models', {
+    page: params.page,
+    limit: params.limit,
+    search: params.search || null,
+    tag: params.tag || null,
+    collectionId: params.collectionId || null,
+    filter: params.filter || null,
+  });
+  return mapAssetPaths(data);
+}
+
+export async function apiGetModelDetail(id: string) {
+  const data = await invoke<any>('get_model_detail', { id });
+  return mapAssetPaths(data);
+}
+
+export async function apiImportModels(filePaths: string[], title?: string, description?: string, tags?: string, collectionId?: string) {
+  const data = await invoke<any>('import_models', {
+    filePaths,
+    title: title || null,
+    description: description || null,
+    tags: tags || null,
+    collectionId: collectionId || null,
+  });
+  return mapAssetPaths(data);
+}
+
+export async function apiUpdateModel(id: string, payload: { title?: string; description?: string; tags?: string; primaryFileId?: string }) {
+  await invoke('update_model', {
+    id,
+    title: payload.title || null,
+    description: payload.description || null,
+    tags: payload.tags || null,
+    primaryFileId: payload.primaryFileId || null,
+  });
+}
+
+export async function apiDeleteModel(id: string) {
+  await invoke('delete_model', { id });
+}
+
+export async function apiToggleFavorite(id: string) {
+  const isFavorited = await invoke<boolean>('toggle_favorite', { id });
+  return { is_favorited: isFavorited };
+}
+
+export async function apiSaveThumbnail(id: string, imageBase64: string) {
+  // imageBase64 is a data URL, strip prefix if present
+  const base64 = imageBase64.startsWith('data:') ? imageBase64.split(',')[1] : imageBase64;
+  const path = await invoke<string>('save_thumbnail', { id, imageBase64: base64 });
+  return { thumbnail_path: path };
+}
+
+export async function apiGetCollections() {
+  const data = await invoke<any[]>('get_collections');
+  return mapAssetPaths(data);
+}
+
+export async function apiCreateCollection(name: string, description: string, parentId: string | null) {
+  return await invoke<any>('create_collection', {
+    name,
+    description,
+    parentFolderId: parentId,
+  });
+}
+
+export async function apiRenameCollection(id: string, name: string) {
+  await invoke('rename_collection', { id, name });
+}
+
+export async function apiDeleteCollection(id: string) {
+  await invoke('delete_collection', { id });
+}
+
+export async function apiAddModelToCollection(collectionId: string, modelId: string) {
+  await invoke('add_model_to_collection', { collectionId, modelId });
+}
+
+export async function apiGetTags() {
+  const data = await invoke<any[]>('get_tags');
+  return mapAssetPaths(data);
+}
+
+export async function pickFiles(multiple = true, filters?: string[]) {
+  const res = await openDialog({
+    multiple,
+    directory: false,
+    filters: filters?.map(ext => ({ name: ext, extensions: [ext] })) || [],
+  });
+  if (!res) return [];
+  return Array.isArray(res) ? res : [res];
+}
+
+export async function apiFetch(url: string, options: RequestInit = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+  const u = new URL(url, 'http://localhost');
+  const pathname = u.pathname;
+  const params = u.searchParams;
+
+  const makeResponse = (data: any) => ({
+    ok: true,
+    status: 200,
+    json: async () => data,
+    text: async () => JSON.stringify(data),
+  });
+
   try {
-    if (user) {
-      localStorage.setItem(USER_KEY, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(USER_KEY);
+    if (pathname === '/api/collections' && method === 'GET') {
+      const data = await apiGetCollections();
+      return makeResponse({ collections: data });
     }
-  } catch {}
-}
-
-export function getStoredCsrfToken(): string | null {
-  try {
-    return localStorage.getItem(CSRF_TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setStoredCsrfToken(token: string | null) {
-  try {
-    if (token) {
-      localStorage.setItem(CSRF_TOKEN_KEY, token);
-    } else {
-      localStorage.removeItem(CSRF_TOKEN_KEY);
+    if (pathname === '/api/tags' && method === 'GET') {
+      const data = await apiGetTags();
+      return makeResponse({ tags: data });
     }
-  } catch {}
+    if (pathname.startsWith('/api/models') && method === 'GET') {
+      const page = Number(params.get('page') || '1');
+      const limit = Number(params.get('limit') || '12');
+      const search = params.get('search') || undefined;
+      const tag = params.get('tag') || null;
+      const collection_id = params.get('collection_id') || null;
+      const filter = params.get('filter') || 'all';
+      const data = await apiGetModels({ page, limit, search, tag, collectionId: collection_id, filter });
+      return makeResponse({ models: data.models, pagination: { total: data.total, page: data.page, limit: data.limit, totalPages: Math.ceil(data.total / data.limit) } });
+    }
+    if (pathname.match(/^\/api\/models\/[^/]+\/favorite$/) && method === 'POST') {
+      const id = pathname.split('/')[3];
+      const data = await apiToggleFavorite(id);
+      return makeResponse(data);
+    }
+    if (pathname.match(/^\/api\/models\/[^/]+\/regenerate-thumbnail$/) && method === 'POST') {
+      return makeResponse({});
+    }
+    if (pathname === '/api/collections' && method === 'POST') {
+      const body = options.body ? JSON.parse(options.body as string) : {};
+      await apiCreateCollection(body.name, body.description || '', body.parent_folder_id || null);
+      return makeResponse({ ok: true });
+    }
+    if (pathname.match(/^\/api\/collections\/[^/]+$/) && method === 'PUT') {
+      const id = pathname.split('/')[3];
+      const body = options.body ? JSON.parse(options.body as string) : {};
+      await apiRenameCollection(id, body.name);
+      return makeResponse({ ok: true });
+    }
+    if (pathname.match(/^\/api\/collections\/[^/]+$/) && method === 'DELETE') {
+      const id = pathname.split('/')[3];
+      await apiDeleteCollection(id);
+      return makeResponse({ ok: true });
+    }
+    if (pathname.match(/^\/api\/collections\/[^/]+\/models$/) && method === 'POST') {
+      const collectionId = pathname.split('/')[3];
+      const body = options.body ? JSON.parse(options.body as string) : {};
+      await apiAddModelToCollection(collectionId, body.model_id);
+      return makeResponse({ ok: true });
+    }
+    // Fallback for unhandled routes
+    return makeResponse({});
+  } catch (e) {
+    return { ok: false, status: 500, json: async () => ({ error: (e as Error).message }) };
+  }
 }
 
-export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(options.headers || {});
-
-  // Attach auth token from localStorage if available (fallback for frames, iframe scenarios)
-  const storedToken = getStoredToken();
-  if (storedToken && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${storedToken}`);
-  }
-
-  // Attach double-submit CSRF token from localStorage if available
-  let storedCsrfToken = getStoredCsrfToken();
-  if (storedCsrfToken && !headers.has('X-CSRF-Token')) {
-    headers.set('X-CSRF-Token', storedCsrfToken);
-  }
-
-  // Set credentials to include so session cookies are also transmitted when supported
-  // Backend prefers cookies for same-origin, uses token for frames
-  const config: RequestInit = {
-    ...options,
-    headers,
-    credentials: 'include',
-  };
-
-  let response = await fetch(url, config);
-
-  // If request failed with 403 CSRF error, attempt to refresh token and retry once
-  if (response.status === 403 && !url.includes('/api/auth/csrf-token')) {
-    try {
-      const csrfRes = await fetch('/api/auth/csrf-token', { credentials: 'include' });
-      if (csrfRes.ok) {
-        const csrfData = await csrfRes.json();
-        if (csrfData.csrfToken) {
-          setStoredCsrfToken(csrfData.csrfToken);
-          headers.set('X-CSRF-Token', csrfData.csrfToken);
-          response = await fetch(url, { ...options, headers, credentials: 'include' });
-        }
-      }
-    } catch {}
-  }
-
-  // If unauthorized (except /api/auth/me which returns no data on error), log warning
-  if (response.status === 401 && !url.includes('/api/auth/me')) {
-    console.warn(`[SLAG3D API] 401 Unauthorized for ${url}`);
-  }
-
-  return response;
-}
