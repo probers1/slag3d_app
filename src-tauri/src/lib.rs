@@ -1,6 +1,7 @@
 use tauri::Builder;
 
 pub mod db;
+pub mod services;
 
 pub fn run() {
     Builder::default()
