@@ -15,6 +15,12 @@
         "height": 800,
         "resizable": true
       }
-    ]
+    ],
+    "security": {
+      "devCsp": "default-src 'self' http://localhost:* https://* slag3d-asset:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: slag3d-asset:;"
+    }
+  },
+  "plugins": {
+    "dialog": {}
   }
 }

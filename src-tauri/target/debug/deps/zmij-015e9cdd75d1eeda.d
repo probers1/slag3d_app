@@ -1,9 +1,0 @@
-/home/probers1/Dev/slag3D_app/src-tauri/target/debug/deps/zmij-015e9cdd75d1eeda.d: /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/lib.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/stdarch_x86.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/traits.rs
-
-/home/probers1/Dev/slag3D_app/src-tauri/target/debug/deps/libzmij-015e9cdd75d1eeda.rlib: /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/lib.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/stdarch_x86.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/traits.rs
-
-/home/probers1/Dev/slag3D_app/src-tauri/target/debug/deps/libzmij-015e9cdd75d1eeda.rmeta: /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/lib.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/stdarch_x86.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/traits.rs
-
-/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/lib.rs:
-/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/stdarch_x86.rs:
-/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/traits.rs:

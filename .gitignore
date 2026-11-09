@@ -17,4 +17,5 @@ secrets/session_secret.txt
 !/uploads/.gitkeep
 /uploads/thumbnails/*
 !/uploads/thumbnails/.gitkeep
+src-tauri/target/
 .aistudio/
