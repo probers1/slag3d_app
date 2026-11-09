@@ -20,7 +20,9 @@
     "test": "tsx tests/smoke.test.ts",
     "test:prod-paths": "tsx tests/production_paths.test.ts",
     "test:upload-security": "tsx tests/upload_security.test.ts",
-    "update": "bash scripts/update.sh"
+    "update": "bash scripts/update.sh",
+    "tauri": "tauri",
+    "build:desktop": "npm run build && tauri build"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
