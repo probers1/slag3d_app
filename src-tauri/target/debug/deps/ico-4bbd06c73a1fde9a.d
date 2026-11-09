@@ -1,0 +1,12 @@
+/home/probers1/Dev/slag3D_app/src-tauri/target/debug/deps/ico-4bbd06c73a1fde9a.d: /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/lib.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/macros.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/bmpdepth.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/icondir.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/image.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/restype.rs
+
+/home/probers1/Dev/slag3D_app/src-tauri/target/debug/deps/libico-4bbd06c73a1fde9a.rlib: /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/lib.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/macros.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/bmpdepth.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/icondir.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/image.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/restype.rs
+
+/home/probers1/Dev/slag3D_app/src-tauri/target/debug/deps/libico-4bbd06c73a1fde9a.rmeta: /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/lib.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/macros.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/bmpdepth.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/icondir.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/image.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/restype.rs
+
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/lib.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/macros.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/bmpdepth.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/icondir.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/image.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ico-0.6.0/src/restype.rs:

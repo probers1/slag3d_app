@@ -1,0 +1,10 @@
+/home/probers1/Dev/slag3D_app/src-tauri/target/debug/deps/tauri_plugin_dialog-ed0dc0546c6e4bff.d: /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/lib.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/desktop.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/commands.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/error.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/models.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/init-iife.js
+
+/home/probers1/Dev/slag3D_app/src-tauri/target/debug/deps/libtauri_plugin_dialog-ed0dc0546c6e4bff.rmeta: /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/lib.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/desktop.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/commands.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/error.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/models.rs /home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/init-iife.js
+
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/lib.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/desktop.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/commands.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/error.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/models.rs:
+/home/probers1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.8.4/src/init-iife.js:
