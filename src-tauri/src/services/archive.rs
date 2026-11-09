@@ -31,6 +31,21 @@ impl From<sevenz_rust::Error> for ArchiveError {
     }
 }
 
+impl std::fmt::Display for ArchiveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArchiveError::Io(e) => write!(f, "IO error: {}", e),
+            ArchiveError::InvalidPath(e) => write!(f, "Invalid path: {}", e),
+            ArchiveError::UnsupportedFormat => write!(f, "Unsupported archive format"),
+            ArchiveError::NoValidFiles => write!(f, "No valid files in archive"),
+            ArchiveError::ZipError(e) => write!(f, "ZIP error: {}", e),
+            ArchiveError::SevenZError(e) => write!(f, "7z error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ArchiveError {}
+
 pub fn is_safe_path(base: &Path, path: &Path) -> bool {
     let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     if let Ok(base_canonical) = base.canonicalize() {

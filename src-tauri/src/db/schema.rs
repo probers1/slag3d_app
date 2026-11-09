@@ -1,6 +1,6 @@
 use rusqlite::{Connection, Result};
 
-const DEFAULT_USER_ID: &str = "00000000-0000-0000-0000-000000000000";
+pub const DEFAULT_USER_ID: &str = "00000000-0000-0000-0000-000000000000";
 
 pub fn init_schema(conn: &Connection) -> Result<()> {
     // Enable pragmas
