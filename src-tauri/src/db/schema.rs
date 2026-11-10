@@ -40,6 +40,8 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             thumbnail_status TEXT NOT NULL CHECK(thumbnail_status IN ('pending','processing','completed','failed')) DEFAULT 'pending',
             width INTEGER NOT NULL DEFAULT 800,
             height INTEGER NOT NULL DEFAULT 600,
+            is_deleted INTEGER NOT NULL DEFAULT 0,
+            deleted_at TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );",

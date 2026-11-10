@@ -23,6 +23,7 @@ pub fn run() {
             commands::collections::add_model_to_collection,
             commands::collections::remove_model_from_collection,
             commands::tags::get_tags,
+            commands::app::init_db,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

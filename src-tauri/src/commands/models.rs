@@ -3,7 +3,7 @@ use crate::commands::{
 };
 use crate::db::schema::DEFAULT_USER_ID;
 use crate::services::archive::{extract_7z, extract_zip};
-use crate::services::storage::{ensure_model_dir, get_model_dir, ExtractedFile};
+use crate::services::storage::ExtractedFile;
 use base64::{engine::general_purpose, Engine as _};
 use std::fs;
 use std::path::Path;
@@ -246,8 +246,11 @@ pub async fn import_models(
     let now = chrono::Utc::now().to_rfc3339();
     let user_id = DEFAULT_USER_ID.to_string();
 
-    // Create model directory
-    ensure_model_dir(&model_id).map_err(|e| e.to_string())?;
+    // Use the same app_data_dir as the DB and asset protocol (com.slag3d.app)
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::env::set_var("SLAG3D_APP_DATA_DIR", &app_data_dir);
+    let models_dir = app_data_dir.join("uploads").join("models").join(&model_id);
+    fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
 
     let mut all_extracted_files = Vec::new();
 
@@ -266,10 +269,8 @@ pub async fn import_models(
             },
             _ => {
                 // Single file - copy to model dir
-                let dest_dir = get_model_dir(&model_id);
-                fs::create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
                 let filename = path.file_name().unwrap().to_string_lossy().to_string();
-                let dest_path = dest_dir.join(&filename);
+                let dest_path = models_dir.join(&filename);
                 fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
                 let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
                 vec![ExtractedFile {
@@ -296,17 +297,18 @@ pub async fn import_models(
         rusqlite::params![&model_id, &user_id, &model_title, &model_description, &now, &now],
     ).map_err(|e| e.to_string())?;
 
-    // Insert files
+    // Insert files with public paths so the asset protocol can serve them
     for (idx, file) in all_extracted_files.iter().enumerate() {
         let file_id = Uuid::new_v4().to_string();
         let mime_type = mime_guess::from_path(&file.destination_path).first_or_octet_stream().to_string();
         let is_primary = if idx == 0 { 1 } else { 0 };
+        let public_path = format!("/uploads/models/{}/{}", model_id, file.filename);
 
         conn.execute(
             "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path, is_primary_3d) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             rusqlite::params![
                 &file_id, &model_id, &file.filename, &file.filename,
-                &mime_type, file.size as i64, &file.destination_path.to_string_lossy(), is_primary
+                &mime_type, file.size as i64, &public_path, is_primary
             ],
         ).map_err(|e| e.to_string())?;
     }
@@ -419,18 +421,23 @@ pub async fn save_thumbnail(app: AppHandle, id: String, image_base64: String) ->
     // Decode base64
     let image_data = general_purpose::STANDARD.decode(&image_base64).map_err(|e| e.to_string())?;
 
-    // Save thumbnail
-    let thumbnails_dir = app.path().app_data_dir().unwrap().join("uploads/thumbnails");
+    // Save thumbnail to uploads/thumbnails/<id>.png
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let uploads_dir = app_data.join("uploads");
+    let thumbnails_dir = uploads_dir.join("thumbnails");
     fs::create_dir_all(&thumbnails_dir).map_err(|e| e.to_string())?;
     let thumbnail_path = thumbnails_dir.join(format!("{}.png", id));
     fs::write(&thumbnail_path, &image_data).map_err(|e| e.to_string())?;
+
+    // Store public path so the asset protocol can serve it
+    let public_path = format!("/uploads/thumbnails/{}.png", id);
 
     // Update model
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE models SET thumbnail_path = ?, thumbnail_status = 'completed', updated_at = ? WHERE id = ?",
-        rusqlite::params![&thumbnail_path.to_string_lossy(), &now, &id],
+        rusqlite::params![&public_path, &now, &id],
     ).map_err(|e| e.to_string())?;
 
-    Ok(thumbnail_path.to_string_lossy().to_string())
+    Ok(public_path)
 }

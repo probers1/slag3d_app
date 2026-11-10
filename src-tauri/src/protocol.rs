@@ -1,9 +1,9 @@
 use std::fs;
-use tauri::{Runtime, UriSchemeContext};
+use tauri::{Manager, Runtime, UriSchemeContext};
 use tauri::http::{Request, Response, StatusCode};
 use mime_guess::from_path;
 
-use crate::services::storage::{get_uploads_dir};
+use crate::services::storage::get_uploads_dir;
 
 pub fn register_asset_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.register_uri_scheme_protocol("slag3d-asset", |ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8>>| {
@@ -12,59 +12,65 @@ pub fn register_asset_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri:
 }
 
 fn handle_asset_request<R: Runtime>(
-    _ctx: &UriSchemeContext<'_, R>,
+    ctx: &UriSchemeContext<'_, R>,
     request: Request<Vec<u8>>,
 ) -> Response<Vec<u8>> {
     let uri = request.uri().to_string();
-    
+
     // Parse the URI to extract the path
     // Expected formats:
     // slag3d-asset://localhost/uploads/models/{id}/{file}
     // slag3d-asset://uploads/models/{id}/{file}
     // slag3d-asset://localhost/uploads/thumbnails/{file}
     // slag3d-asset://uploads/thumbnails/{file}
-    
+
     let path = match extract_path_from_uri(&uri) {
         Some(p) => p,
         None => return not_found(),
     };
 
+    // Use the same app_data_dir as the DB and thumbnails (com.slag3d.app)
+    let app_data_dir = match ctx.app_handle().path().app_data_dir() {
+        Ok(p) => p,
+        Err(_) => return not_found(),
+    };
+    let uploads_dir = app_data_dir.join("uploads");
+
     // Security: ensure the path is within uploads directory
-    let uploads_dir = get_uploads_dir();
     let requested_path = uploads_dir.join(&path);
-    
+
     // Canonicalize to prevent directory traversal
     let canonical_uploads = match fs::canonicalize(&uploads_dir) {
         Ok(p) => p,
         Err(_) => return not_found(),
     };
-    
+
     let canonical_requested = match fs::canonicalize(&requested_path) {
         Ok(p) => p,
         Err(_) => return not_found(),
     };
-    
+
     // Ensure the requested path is within uploads directory
     if !canonical_requested.starts_with(&canonical_uploads) {
         return not_found();
     }
-    
+
     // Check if file exists
     if !canonical_requested.is_file() {
         return not_found();
     }
-    
+
     // Read file
     let content = match fs::read(&canonical_requested) {
         Ok(c) => c,
         Err(_) => return not_found(),
     };
-    
+
     // Determine MIME type
     let mime_type = from_path(&canonical_requested)
         .first_or_octet_stream()
         .to_string();
-    
+
     // Respond with file content
     Response::builder()
         .status(StatusCode::OK)

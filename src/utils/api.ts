@@ -119,6 +119,10 @@ export async function pickFiles(multiple = true, filters?: string[]) {
   return Array.isArray(res) ? res : [res];
 }
 
+export async function apiInitDb() {
+  await invoke('init_db');
+}
+
 export async function apiFetch(url: string, options: RequestInit = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const u = new URL(url, 'http://localhost');
@@ -187,4 +191,3 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
     return { ok: false, status: 500, json: async () => ({ error: (e as Error).message }) };
   }
 }
-

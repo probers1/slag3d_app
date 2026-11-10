@@ -1,6 +1,7 @@
 pub mod models;
 pub mod collections;
 pub mod tags;
+pub mod app;
 
 use serde::{Deserialize, Serialize};
 

@@ -6,7 +6,7 @@ import { ModelCard } from './components/ModelCard';
 import { CollectionsDrawer } from './components/CollectionsDrawer';
 import { UploadModal } from './components/UploadModal';
 import { ModelViewerModal } from './components/ModelViewerModal';
-import { apiFetch } from './utils/api';
+import { apiFetch, apiInitDb } from './utils/api';
 
 export default function App() {
   // Filter and pagination state
@@ -82,8 +82,10 @@ export default function App() {
   }, [activeTab, searchQuery, selectedTag, selectedCollectionId, currentPage, itemsPerPage]);
 
   useEffect(() => {
-    fetchCollections();
-    fetchTags();
+    apiInitDb().then(() => {
+      fetchCollections();
+      fetchTags();
+    });
   }, [fetchCollections, fetchTags]);
 
   // Fetch models whenever filters, pagination, or user context change

@@ -18,6 +18,10 @@ pub fn is_allowed_extension(filename: &str) -> bool {
 }
 
 pub fn get_app_data_dir() -> PathBuf {
+    // Allow runtime override (set by Tauri init from app.path().app_data_dir())
+    if let Ok(dir) = std::env::var("SLAG3D_APP_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
     // In Tauri, PathResolver is accessible via app.handle() in commands
     // For utility functions, use home directory as fallback for tests
     // This will be properly initialized in commands using PathResolver
