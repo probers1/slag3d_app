@@ -3350,6 +3350,7 @@ dependencies = [
  "serde_json",
  "sevenz-rust",
  "tauri",
+ "tauri-build",
  "tauri-plugin-dialog",
  "tokio",
  "urlencoding",

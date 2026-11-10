@@ -1,4 +1,3 @@
 fn main() {
-    // Tauri v2 build script placeholder
-    // Build script runs before compiling Rust code
+    tauri_build::try_build(tauri_build::Attributes::new()).expect("failed to run tauri-build");
 }
