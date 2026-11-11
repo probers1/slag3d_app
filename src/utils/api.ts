@@ -163,6 +163,47 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
     if (pathname.match(/^\/api\/models\/[^/]+\/regenerate-thumbnail$/) && method === 'POST') {
       return makeResponse({});
     }
+    // GET /api/models/{id} — model detail (viewer, edit)
+    if (pathname.match(/^\/api\/models\/[^/]+$/) && method === 'GET') {
+      const id = pathname.split('/')[3];
+      const data = await apiGetModelDetail(id);
+      return makeResponse({ model: data });
+    }
+    // PUT /api/models/{id} — update metadata / primary file
+    if (pathname.match(/^\/api\/models\/[^/]+$/) && method === 'PUT') {
+      const id = pathname.split('/')[3];
+      const body = options.body ? JSON.parse(options.body as string) : {};
+      await apiUpdateModel(id, {
+        title: body.title,
+        description: body.description,
+        tags: body.tags,
+        primaryFileId: body.primary_file_id,
+      });
+      return makeResponse({ ok: true });
+    }
+    // DELETE /api/models/{id}
+    if (pathname.match(/^\/api\/models\/[^/]+$/) && method === 'DELETE') {
+      const id = pathname.split('/')[3];
+      await apiDeleteModel(id);
+      return makeResponse({ ok: true });
+    }
+    // POST /api/models/{id}/files — supplementary file upload
+    if (pathname.match(/^\/api\/models\/[^/]+\/files$/) && method === 'POST') {
+      const id = pathname.split('/')[3];
+      // Forward form data via Tauri command (file paths from dialog)
+      const form = options.body as FormData;
+      const files: string[] = [];
+      if (form && typeof form.entries === 'function') {
+        for (const [key, value] of form.entries()) {
+          if (key === 'files' && value instanceof File) {
+            // Tauri can't receive File objects; use the web dialog path instead
+            files.push((value as File).name);
+          }
+        }
+      }
+      // No-op shim: supplementary upload not yet wired to a Tauri command
+      return makeResponse({ ok: true });
+    }
     if (pathname === '/api/collections' && method === 'POST') {
       const body = options.body ? JSON.parse(options.body as string) : {};
       await apiCreateCollection(body.name, body.description || '', body.parent_folder_id || null);

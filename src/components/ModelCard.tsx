@@ -53,11 +53,11 @@ export const ModelCard: React.FC<ModelCardProps> = ({
           />
         ) : model.thumbnail_status === 'processing' || model.thumbnail_status === 'pending' ? (
           <div className="flex flex-col items-center justify-center p-6 text-center">
-            <RefreshCw className="w-8 h-8 text-blue-400 animate-spin mb-2.5 opacity-80" />
+            <Box className="w-8 h-8 text-blue-400/60 mb-2.5" />
             <span className="text-xs font-medium text-neutral-300">
-              {model.thumbnail_status === 'processing' ? 'Rendering 512px view...' : 'Queued in render queue...'}
+              Ready to view in 3D
             </span>
-            <span className="text-[10px] text-neutral-500 mt-1">Headless Chromium worker</span>
+            <span className="text-[10px] text-neutral-500 mt-1">Click to open viewer</span>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center p-6 text-center">
