@@ -123,6 +123,21 @@ export async function apiInitDb() {
   await invoke('init_db');
 }
 
+export async function fetchFileAsBlob(path: string): Promise<Blob> {
+  const base64 = await invoke<string>('fetch_file', { path });
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return new Blob([bytes]);
+}
+
+export async function fetchFileAsUrl(path: string): Promise<string> {
+  const blob = await fetchFileAsBlob(path);
+  return URL.createObjectURL(blob);
+}
+
 export async function apiFetch(url: string, options: RequestInit = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const u = new URL(url, 'http://localhost');

@@ -30,7 +30,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { ModelFile, CollectionItem } from '../types';
-import { apiFetch, apiSaveThumbnail } from '../utils/api';
+import { apiFetch, apiSaveThumbnail, fetchFileAsUrl } from '../utils/api';
 
 interface ModelDetail {
   id: string;
@@ -246,7 +246,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   };
 
   // Load active 3D file into the Three.js scene
-  const loadActiveMesh = useCallback((activeFile: ModelFile) => {
+  const loadActiveMesh = useCallback(async (activeFile: ModelFile) => {
     if (!sceneRef.current || !cameraRef.current || !controlsRef.current) return;
 
     const scene = sceneRef.current;
@@ -327,63 +327,77 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       setLoadingMesh(false);
     };
 
-    const ext = activeFile.original_name.split('.').pop()?.toLowerCase();
+    try {
+      // Convert slag3d-asset:// URL to a blob URL that Three.js loaders can fetch
+      const blobUrl = await fetchFileAsUrl(activeFile.file_path);
+      const ext = activeFile.original_name.split('.').pop()?.toLowerCase();
 
-    if (ext === 'stl') {
-      const loader = new STLLoader();
-      loader.load(
-        activeFile.file_path,
-        (geometry) => {
-          geometry.computeVertexNormals();
-          const mesh = new THREE.Mesh(geometry, material);
-          attachAndPosition(mesh, geometry);
-        },
-        undefined,
-        (err) => {
-          console.error('STL loading error:', err);
-          setLoadingMesh(false);
-        }
-      );
-    } else if (ext === 'obj') {
-      const loader = new OBJLoader();
-      loader.load(
-        activeFile.file_path,
-        (obj) => {
-          obj.traverse((child) => {
-            if ((child as THREE.Mesh).isMesh) {
-              (child as THREE.Mesh).material = material;
-            }
-          });
-          attachAndPosition(obj);
-        },
-        undefined,
-        (err) => {
-          console.error('OBJ loading error:', err);
-          setLoadingMesh(false);
-        }
-      );
-    } else if (ext === '3mf') {
-      const loader = new ThreeMFLoader();
-      loader.load(
-        activeFile.file_path,
-        (group) => {
-          group.traverse((child) => {
-            if ((child as THREE.Mesh).isMesh) {
-              (child as THREE.Mesh).material = material;
-            }
-          });
-          attachAndPosition(group);
-        },
-        undefined,
-        (err) => {
-          console.error('3MF loading error:', err);
-          setLoadingMesh(false);
-        }
-      );
-    } else {
-      const geom = new THREE.DodecahedronGeometry(25, 0);
-      const mesh = new THREE.Mesh(geom, material);
-      attachAndPosition(mesh, geom);
+      if (ext === 'stl') {
+        const loader = new STLLoader();
+        loader.load(
+          blobUrl,
+          (geometry) => {
+            geometry.computeVertexNormals();
+            const mesh = new THREE.Mesh(geometry, material);
+            attachAndPosition(mesh, geometry);
+            URL.revokeObjectURL(blobUrl);
+          },
+          undefined,
+          (err) => {
+            console.error('STL loading error:', err);
+            URL.revokeObjectURL(blobUrl);
+            setLoadingMesh(false);
+          }
+        );
+      } else if (ext === 'obj') {
+        const loader = new OBJLoader();
+        loader.load(
+          blobUrl,
+          (obj) => {
+            obj.traverse((child) => {
+              if ((child as THREE.Mesh).isMesh) {
+                (child as THREE.Mesh).material = material;
+              }
+            });
+            attachAndPosition(obj);
+            URL.revokeObjectURL(blobUrl);
+          },
+          undefined,
+          (err) => {
+            console.error('OBJ loading error:', err);
+            URL.revokeObjectURL(blobUrl);
+            setLoadingMesh(false);
+          }
+        );
+      } else if (ext === '3mf') {
+        const loader = new ThreeMFLoader();
+        loader.load(
+          blobUrl,
+          (group) => {
+            group.traverse((child) => {
+              if ((child as THREE.Mesh).isMesh) {
+                (child as THREE.Mesh).material = material;
+              }
+            });
+            attachAndPosition(group);
+            URL.revokeObjectURL(blobUrl);
+          },
+          undefined,
+          (err) => {
+            console.error('3MF loading error:', err);
+            URL.revokeObjectURL(blobUrl);
+            setLoadingMesh(false);
+          }
+        );
+      } else {
+        URL.revokeObjectURL(blobUrl);
+        const geom = new THREE.DodecahedronGeometry(25, 0);
+        const mesh = new THREE.Mesh(geom, material);
+        attachAndPosition(mesh, geom);
+      }
+    } catch (err) {
+      console.error('Failed to load 3D file:', err);
+      setLoadingMesh(false);
     }
   }, [wireframe]);
 

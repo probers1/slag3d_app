@@ -10,6 +10,34 @@ use std::path::Path;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
+#[tauri::command]
+pub async fn fetch_file(app: AppHandle, path: String) -> Result<String, String> {
+    // Resolve the asset path to the actual filesystem path
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let uploads_dir = app_data_dir.join("uploads");
+
+    // Strip the slag3d-asset:// prefix and resolve relative to uploads
+    let relative = path
+        .strip_prefix("slag3d-asset://")
+        .or_else(|| path.strip_prefix("slag3d-asset:"))
+        .unwrap_or(&path);
+
+    // Remove optional localhost/ prefix
+    let relative = relative.strip_prefix("localhost/").unwrap_or(relative);
+
+    let file_path = uploads_dir.join(relative);
+
+    // Security: ensure the resolved path is within uploads directory
+    let canonical_uploads = fs::canonicalize(&uploads_dir).map_err(|e| e.to_string())?;
+    let canonical_file = fs::canonicalize(&file_path).map_err(|e| e.to_string())?;
+    if !canonical_file.starts_with(&canonical_uploads) {
+        return Err("Access denied".to_string());
+    }
+
+    let content = fs::read(&canonical_file).map_err(|e| e.to_string())?;
+    Ok(general_purpose::STANDARD.encode(&content))
+}
+
 const PAGE_SIZE: u32 = 24;
 
 fn get_db_connection(app: &AppHandle) -> rusqlite::Result<rusqlite::Connection> {
@@ -165,16 +193,16 @@ pub async fn get_model_detail(
         rusqlite::params![&user_id, &id],
         |row| {
             Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, String>(8)?,
-                row.get::<_, bool>(9)?,
+                row.get::<_, String>(0)?,   // m.id
+                row.get::<_, String>(1)?,   // m.user_id
+                row.get::<_, String>(2)?,   // m.title
+                row.get::<_, String>(3)?,   // m.description
+                row.get::<_, Option<String>>(4)?,  // m.thumbnail_path
+                row.get::<_, String>(5)?,   // m.thumbnail_status
+                row.get::<_, String>(6)?,   // m.created_at
+                row.get::<_, String>(7)?,   // m.updated_at
+                row.get::<_, String>(8)?,   // u.username as owner_username
+                row.get::<_, bool>(9)?,     // is_favorited
             ))
         },
     ).map_err(|e| e.to_string())?;
