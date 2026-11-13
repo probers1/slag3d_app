@@ -3,7 +3,9 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
 function mapAssetPaths(value: any): any {
   if (typeof value === 'string') {
-    return value.replace(/^\/uploads\//, 'slag3d-asset://uploads/');
+    // Keep original public paths (e.g. /uploads/models/.../file.stl) unchanged.
+    // The frontend will resolve them via invoke('read_file', ...) -> blob URL.
+    return value;
   }
   if (Array.isArray(value)) {
     return value.map(mapAssetPaths);
@@ -125,6 +127,18 @@ export async function pickFiles(multiple = true, filters?: string[]) {
 
 export async function apiInitDb() {
   await invoke('init_db');
+}
+
+// Read an uploaded asset file via Tauri and return a blob URL.
+// Caller must revoke the URL when done (use try/finally).
+export async function fetchFileAsBlobUrl(path: string): Promise<string> {
+  const base64 = await invoke<string>('read_file', { path });
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return URL.createObjectURL(new Blob([bytes]));
 }
 
 export async function apiFetch(url: string, options: RequestInit = {}) {

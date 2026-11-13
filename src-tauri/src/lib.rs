@@ -37,6 +37,7 @@ pub fn run() {
             commands::models::toggle_favorite,
             commands::models::save_thumbnail,
             commands::models::add_model_files,
+            commands::models::read_file,
             commands::collections::get_collections,
             commands::collections::create_collection,
             commands::collections::rename_collection,

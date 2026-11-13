@@ -573,6 +573,40 @@ pub async fn toggle_favorite(app: AppHandle, id: String) -> Result<bool, String>
     }
 }
 
+/// Read an uploaded asset off disk and return its bytes as base64.
+/// The frontend wraps these in a Blob URL so Three.js loaders don't have to
+/// `fetch()` a custom-scheme URL (which WebView2 on Windows intercepts
+/// differently from WKWebView, leaving the viewer and thumbnail renderer blank).
+#[tauri::command]
+pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let uploads_dir = app_data_dir.join("uploads");
+
+    // Accept either the mapped `slag3d-asset://uploads/...` form or a raw
+    // `/uploads/...` / `uploads/...` public path.
+    let relative = path
+        .strip_prefix("slag3d-asset://")
+        .or_else(|| path.strip_prefix("slag3d-asset:"))
+        .unwrap_or(&path)
+        .strip_prefix("localhost/")
+        .unwrap_or(&path)
+        .trim_start_matches('/');
+    // Drop the leading `uploads/` so we join directly under uploads_dir.
+    let relative = relative.strip_prefix("uploads/").unwrap_or(relative);
+
+    let file_path = uploads_dir.join(relative);
+
+    // Security: the resolved path must stay inside the uploads tree.
+    let canonical_uploads = fs::canonicalize(&uploads_dir).map_err(|e| e.to_string())?;
+    let canonical_file = fs::canonicalize(&file_path).map_err(|e| e.to_string())?;
+    if !canonical_file.starts_with(&canonical_uploads) || !canonical_file.is_file() {
+        return Err("Access denied".to_string());
+    }
+
+    let content = fs::read(&canonical_file).map_err(|e| e.to_string())?;
+    Ok(general_purpose::STANDARD.encode(&content))
+}
+
 #[tauri::command]
 pub async fn save_thumbnail(app: AppHandle, id: String, image_base64: String) -> Result<String, String> {
     let conn = get_db_connection(&app).map_err(|e| e.to_string())?;

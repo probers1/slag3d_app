@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { ModelFile, CollectionItem } from '../types';
 import { Dropdown } from './Dropdown';
-import { apiFetch, apiSaveThumbnail } from '../utils/api';
+import { apiFetch, apiSaveThumbnail, fetchFileAsBlobUrl } from '../utils/api';
 
 interface ModelDetail {
   id: string;
@@ -340,29 +340,35 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
 
     let blobUrl: string | null = null;
     try {
-      // Use the asset protocol URL directly (Three.js loaders can fetch from slag3d-asset://)
-      const assetUrl = activeFile.file_path;
+      // Use Tauri's read_file command to get raw bytes and build a blob URL.
+      // WebView2 on Windows cannot fetch custom-scheme URLs (slag3d-asset://)
+      // reliably, so we bypass the protocol entirely.
+      blobUrl = await fetchFileAsBlobUrl(activeFile.file_path);
       const ext = activeFile.original_name.split('.').pop()?.toLowerCase();
 
       if (ext === 'stl') {
         const loader = new STLLoader();
         loader.load(
-          assetUrl,
+          blobUrl,
           (geometry) => {
             geometry.computeVertexNormals();
             const mesh = new THREE.Mesh(geometry, material);
             attachAndPosition(mesh, geometry);
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+            blobUrl = null;
           },
           undefined,
           (err) => {
             console.error('STL loading error:', err);
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+            blobUrl = null;
             setLoadingMesh(false);
           }
         );
       } else if (ext === 'obj') {
         const loader = new OBJLoader();
         loader.load(
-          assetUrl,
+          blobUrl,
           (obj) => {
             obj.traverse((child) => {
               if ((child as THREE.Mesh).isMesh) {
@@ -370,17 +376,21 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
               }
             });
             attachAndPosition(obj);
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+            blobUrl = null;
           },
           undefined,
           (err) => {
             console.error('OBJ loading error:', err);
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+            blobUrl = null;
             setLoadingMesh(false);
           }
         );
       } else if (ext === '3mf') {
         const loader = new ThreeMFLoader();
         loader.load(
-          assetUrl,
+          blobUrl,
           (group) => {
             group.traverse((child) => {
               if ((child as THREE.Mesh).isMesh) {
@@ -388,20 +398,28 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
               }
             });
             attachAndPosition(group);
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+            blobUrl = null;
           },
           undefined,
           (err) => {
             console.error('3MF loading error:', err);
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+            blobUrl = null;
             setLoadingMesh(false);
           }
         );
       } else {
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        blobUrl = null;
         const geom = new THREE.DodecahedronGeometry(25, 0);
         const mesh = new THREE.Mesh(geom, material);
         attachAndPosition(mesh, geom);
       }
     } catch (err) {
       console.error('Failed to load 3D file:', err);
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      blobUrl = null;
       setLoadingMesh(false);
     }
   }, [wireframe]);
