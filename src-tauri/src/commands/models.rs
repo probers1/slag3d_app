@@ -11,39 +11,6 @@ use std::path::Path;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
-#[tauri::command]
-pub async fn fetch_file(app: AppHandle, path: String) -> Result<String, String> {
-    // Resolve the asset path to the actual filesystem path
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let uploads_dir = app_data_dir.join("uploads");
-
-    // Strip the slag3d-asset:// prefix and resolve relative to uploads
-    let relative = path
-        .strip_prefix("slag3d-asset://")
-        .or_else(|| path.strip_prefix("slag3d-asset:"))
-        .unwrap_or(&path);
-
-    // Remove optional localhost/ prefix
-    let relative = relative.strip_prefix("localhost/").unwrap_or(relative);
-
-    // Frontend paths carry an uploads/ prefix; uploads_dir is already <app_data>/uploads
-    let relative = relative.strip_prefix("uploads/").unwrap_or(relative);
-
-    let file_path = uploads_dir.join(relative);
-
-    // Security: ensure the resolved path is within uploads directory
-    let canonical_uploads = fs::canonicalize(&uploads_dir).map_err(|e| e.to_string())?;
-    let canonical_file = fs::canonicalize(&file_path).map_err(|e| e.to_string())?;
-    if !canonical_file.starts_with(&canonical_uploads) {
-        return Err("Access denied".to_string());
-    }
-
-    let content = fs::read(&canonical_file).map_err(|e| e.to_string())?;
-    Ok(general_purpose::STANDARD.encode(&content))
-}
-
-const PAGE_SIZE: u32 = 24;
-
 fn get_db_connection(app: &AppHandle) -> rusqlite::Result<rusqlite::Connection> {
     let path_resolver = app.path();
     let db_path = path_resolver.app_data_dir().unwrap().join("vault.db");

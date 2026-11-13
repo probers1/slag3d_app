@@ -3,8 +3,6 @@ use tauri::{Manager, Runtime, UriSchemeContext};
 use tauri::http::{Request, Response, StatusCode};
 use mime_guess::from_path;
 
-use crate::services::storage::get_uploads_dir;
-
 pub fn register_asset_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.register_uri_scheme_protocol("slag3d-asset", |ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8>>| {
         handle_asset_request(&ctx, request)

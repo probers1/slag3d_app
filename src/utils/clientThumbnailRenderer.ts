@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js';
-import { apiSaveThumbnail, fetchFileAsUrl } from './api';
+import { apiSaveThumbnail } from './api';
 
 // Cache of model IDs currently being processed client-side to prevent duplicates
 const renderingQueue = new Set<string>();
@@ -15,12 +15,9 @@ export async function renderThumbnailInBrowser(
   if (renderingQueue.has(modelId)) return false;
   renderingQueue.add(modelId);
 
-  let fileUrl: string | null = null;
-
   try {
-    // Read the file through the Tauri command and hand Three.js a blob URL.
-    // The custom slag3d-asset:// scheme is cross-origin for fetch/loaders.
-    fileUrl = await fetchFileAsUrl(filePath);
+    // Use the asset protocol URL directly (Three.js loaders can fetch from slag3d-asset://)
+    const assetUrl = filePath;
     const ext = filePath.split('.').pop()?.toLowerCase() || 'stl';
 
     // Create offscreen canvas (512x512)
@@ -93,14 +90,14 @@ export async function renderThumbnailInBrowser(
 
     if (ext === 'stl') {
       const loader = new STLLoader();
-      const geometry = await loader.loadAsync(fileUrl);
+      const geometry = await loader.loadAsync(assetUrl);
       geometry.computeVertexNormals();
       const mesh = new THREE.Mesh(geometry, material);
       await fitAndRender(mesh);
       geometry.dispose();
     } else if (ext === 'obj') {
       const loader = new OBJLoader();
-      const obj = await loader.loadAsync(fileUrl);
+      const obj = await loader.loadAsync(assetUrl);
       obj.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {
           (child as THREE.Mesh).material = material;
@@ -109,7 +106,7 @@ export async function renderThumbnailInBrowser(
       await fitAndRender(obj);
     } else if (ext === '3mf') {
       const loader = new ThreeMFLoader();
-      const group = await loader.loadAsync(fileUrl);
+      const group = await loader.loadAsync(assetUrl);
       group.traverse((child) => {
         if ((child as THREE.Mesh).isMesh) {
           (child as THREE.Mesh).material = material;
@@ -128,7 +125,6 @@ export async function renderThumbnailInBrowser(
     console.warn(`[SLAG3D Fallback] Client render error for model ${modelId}:`, err);
     return false;
   } finally {
-    if (fileUrl) URL.revokeObjectURL(fileUrl);
     renderingQueue.delete(modelId);
   }
 }

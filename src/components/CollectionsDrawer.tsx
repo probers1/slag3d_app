@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Folder, FolderPlus, ChevronRight, ChevronDown, Trash2, Edit2, X, Plus } from 'lucide-react';
 import { CollectionItem } from '../types';
+import { apiFetch } from '../utils/api';
 
 interface CollectionsDrawerProps {
   collections: CollectionItem[];
@@ -29,6 +30,10 @@ export const CollectionsDrawer: React.FC<CollectionsDrawerProps> = ({
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+
+  // WebKitGTK drops window.confirm (Tauri installs no script-dialog handler), so
+  // destructive actions use an in-app two-step confirm instead.
+  const [confirmDeleteCollectionId, setConfirmDeleteCollectionId] = useState<string | null>(null);
 
   // Build tree from flat list using parent_folder_id
   const rootCollections = collections.filter((c) => !c.parent_folder_id);
@@ -134,14 +139,22 @@ export const CollectionsDrawer: React.FC<CollectionsDrawerProps> = ({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`Delete collection "${item.name}"?`)) {
+                if (confirmDeleteCollectionId === item.id) {
                   onDeleteCollection(item.id);
+                  setConfirmDeleteCollectionId(null);
+                } else {
+                  setConfirmDeleteCollectionId(item.id);
                 }
               }}
               title="Delete folder"
-              className="p-1 text-neutral-500 hover:text-red-400 rounded hover:bg-black/40 transition-colors"
+              className={`p-1 rounded hover:bg-black/40 transition-colors ${
+                confirmDeleteCollectionId === item.id
+                  ? 'text-white bg-red-600 hover:bg-red-500'
+                  : 'text-neutral-500 hover:text-red-400 hover:bg-red-950/40'
+              }`}
             >
               <Trash2 className="w-3 h-3" />
+              {confirmDeleteCollectionId === item.id && <span className="sr-only">Confirm</span>}
             </button>
           </div>
         </div>

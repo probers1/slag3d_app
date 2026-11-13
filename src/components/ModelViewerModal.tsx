@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { ModelFile, CollectionItem } from '../types';
 import { Dropdown } from './Dropdown';
-import { apiFetch, apiSaveThumbnail, fetchFileAsUrl } from '../utils/api';
+import { apiFetch, apiSaveThumbnail } from '../utils/api';
 
 interface ModelDetail {
   id: string;
@@ -113,6 +113,11 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   // destructive actions use an in-app two-step confirm instead.
   const [confirmDeleteModel, setConfirmDeleteModel] = useState(false);
   const [confirmDeleteFileId, setConfirmDeleteFileId] = useState<string | null>(null);
+
+  // Clear file delete confirmation when clicking a different file's trash button
+  const clearFileConfirm = useCallback(() => {
+    setConfirmDeleteFileId(null);
+  }, []);
 
   // Three.js internal references
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -333,32 +338,31 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       setLoadingMesh(false);
     };
 
+    let blobUrl: string | null = null;
     try {
-      // Convert slag3d-asset:// URL to a blob URL that Three.js loaders can fetch
-      const blobUrl = await fetchFileAsUrl(activeFile.file_path);
+      // Use the asset protocol URL directly (Three.js loaders can fetch from slag3d-asset://)
+      const assetUrl = activeFile.file_path;
       const ext = activeFile.original_name.split('.').pop()?.toLowerCase();
 
       if (ext === 'stl') {
         const loader = new STLLoader();
         loader.load(
-          blobUrl,
+          assetUrl,
           (geometry) => {
             geometry.computeVertexNormals();
             const mesh = new THREE.Mesh(geometry, material);
             attachAndPosition(mesh, geometry);
-            URL.revokeObjectURL(blobUrl);
           },
           undefined,
           (err) => {
             console.error('STL loading error:', err);
-            URL.revokeObjectURL(blobUrl);
             setLoadingMesh(false);
           }
         );
       } else if (ext === 'obj') {
         const loader = new OBJLoader();
         loader.load(
-          blobUrl,
+          assetUrl,
           (obj) => {
             obj.traverse((child) => {
               if ((child as THREE.Mesh).isMesh) {
@@ -366,19 +370,17 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
               }
             });
             attachAndPosition(obj);
-            URL.revokeObjectURL(blobUrl);
           },
           undefined,
           (err) => {
             console.error('OBJ loading error:', err);
-            URL.revokeObjectURL(blobUrl);
             setLoadingMesh(false);
           }
         );
       } else if (ext === '3mf') {
         const loader = new ThreeMFLoader();
         loader.load(
-          blobUrl,
+          assetUrl,
           (group) => {
             group.traverse((child) => {
               if ((child as THREE.Mesh).isMesh) {
@@ -386,17 +388,14 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
               }
             });
             attachAndPosition(group);
-            URL.revokeObjectURL(blobUrl);
           },
           undefined,
           (err) => {
             console.error('3MF loading error:', err);
-            URL.revokeObjectURL(blobUrl);
             setLoadingMesh(false);
           }
         );
       } else {
-        URL.revokeObjectURL(blobUrl);
         const geom = new THREE.DodecahedronGeometry(25, 0);
         const mesh = new THREE.Mesh(geom, material);
         attachAndPosition(mesh, geom);
@@ -835,7 +834,10 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                     return (
                       <div
                         key={file.id}
-                        onClick={() => setSelectedFileId(file.id)}
+                        onClick={() => {
+                          setSelectedFileId(file.id);
+                          clearFileConfirm();
+                        }}
                         className={`flex items-center justify-between p-2.5 rounded-lg text-xs cursor-pointer transition-all border ${
                           isCurrent
                             ? 'bg-blue-950/30 border-blue-500/60 shadow-sm shadow-blue-950/30'
