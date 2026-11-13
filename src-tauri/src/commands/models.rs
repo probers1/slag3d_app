@@ -383,6 +383,104 @@ pub async fn update_model(
     Ok(())
 }
 
+/// Add supplementary files to an existing model. Mirrors the web server's
+/// `POST /api/models/{id}/files` flow: extract archives, copy direct files,
+/// designate the largest 3D file as primary when it beats the current one.
+#[tauri::command]
+pub async fn add_model_files(
+    app: AppHandle,
+    model_id: String,
+    file_paths: Vec<String>,
+) -> Result<Vec<ModelFile>, String> {
+    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::env::set_var("SLAG3D_APP_DATA_DIR", &app_data_dir);
+    let models_dir = app_data_dir.join("uploads").join("models").join(&model_id);
+    fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
+
+    let mut all_extracted: Vec<ExtractedFile> = Vec::new();
+    for file_path_str in &file_paths {
+        let path = Path::new(file_path_str);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        let extracted = match ext.as_str() {
+            "zip" => extract_zip(path, &model_id)
+                .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?,
+            "7z" => extract_7z(path, &model_id)
+                .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?,
+            _ => {
+                let filename = path.file_name().unwrap().to_string_lossy().to_string();
+                let dest_path = models_dir.join(&filename);
+                fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
+                let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
+                vec![ExtractedFile {
+                    filename,
+                    destination_path: dest_path,
+                    size,
+                }]
+            }
+        };
+        all_extracted.extend(extracted);
+    }
+
+    if all_extracted.is_empty() {
+        return Err("No valid 3D files found in archives".to_string());
+    }
+
+    let mut inserted: Vec<ModelFile> = Vec::new();
+    for file in &all_extracted {
+        let file_id = Uuid::new_v4().to_string();
+        let mime_type = mime_guess::from_path(&file.destination_path).first_or_octet_stream().to_string();
+        let public_path = format!("/uploads/models/{}/{}", model_id, file.filename);
+        conn.execute(
+            "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path, is_primary_3d) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![
+                &file_id, &model_id, &file.filename, &file.filename,
+                &mime_type, file.size as i64, &public_path, 0,
+            ],
+        ).map_err(|e| e.to_string())?;
+        inserted.push(ModelFile {
+            id: file_id,
+            filename: file.filename.clone(),
+            original_name: file.filename.clone(),
+            mime_type,
+            file_size: file.size,
+            file_path: public_path,
+            is_primary_3d: 0,
+        });
+    }
+
+    // Recompute primary: promote the largest new 3D file if it beats the current primary
+    let current_primary = conn
+        .prepare("SELECT id, file_size FROM files WHERE model_id = ? AND is_primary_3d = 1")
+        .map_err(|e| e.to_string())?
+        .query_row(rusqlite::params![&model_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let is_3d = |name: &str| {
+        matches!(
+            Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str(),
+            "stl" | "3mf" | "obj"
+        )
+    };
+
+    let largest_new = inserted
+        .iter()
+        .filter(|f| is_3d(&f.original_name))
+        .max_by_key(|f| f.file_size);
+
+    if let Some(largest) = largest_new {
+        if current_primary.map_or(true, |(_, size)| largest.file_size as u64 > size as u64) {
+            conn.execute("UPDATE files SET is_primary_3d = 0 WHERE model_id = ?", rusqlite::params![&model_id])
+                .map_err(|e| e.to_string())?;
+            conn.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ? AND model_id = ?", rusqlite::params![&largest.id, &model_id])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(inserted)
+}
+
 #[tauri::command]
 pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
     let conn = get_db_connection(&app).map_err(|e| e.to_string())?;

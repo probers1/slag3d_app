@@ -212,7 +212,7 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
         }
       }
       // No-op shim: supplementary upload not yet wired to a Tauri command
-      return makeResponse({ ok: true });
+      return makeResponse({ ok: true }); // TODO: supplement upload not wired to Tauri command on desktop;
     }
     if (pathname === '/api/collections' && method === 'POST') {
       const body = options.body ? JSON.parse(options.body as string) : {};

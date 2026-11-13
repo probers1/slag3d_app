@@ -71,7 +71,10 @@ export function resolveUploadsPath(publicPath: string): string {
   }
 
   // Resolve relative to UPLOADS_DIR, then verify the result still sits
-  // inside it. Using the separator prevents the `<dir>-evil` prefix bypass.
+  // inside it. path.resolve normalises `..` components, so a path like
+  // /uploads/models/../thumbnails/evil.png would resolve to
+  // UPLOADS_DIR/thumbnails/evil.png and is caught by the startsWith check
+  // below.
   const resolved = path.resolve(UPLOADS_DIR, relative.slice(prefix.length));
   if (resolved === UPLOADS_DIR || resolved.startsWith(UPLOADS_DIR + path.sep)) {
     return resolved;
