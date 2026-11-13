@@ -3,6 +3,7 @@ import { X, Upload, FileCode, CheckCircle, AlertCircle } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { CollectionItem } from '../types';
 import { apiImportModels, pickFiles } from '../utils/api';
+import { Dropdown } from './Dropdown';
 
 interface UploadModalProps {
   collections: CollectionItem[];
@@ -144,18 +145,18 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-neutral-300 mb-1">Assign to Collection</label>
-                <select
+                <Dropdown
                   value={collectionId}
-                  onChange={(e) => setCollectionId(e.target.value)}
+                  onChange={setCollectionId}
+                  options={[
+                    { value: '', label: 'No Collection (Vault Root)' },
+                    ...collections.map((c) => ({
+                      value: c.id,
+                      label: c.parent_folder_id ? `└── ${c.name}` : c.name,
+                    })),
+                  ]}
                   className="w-full bg-[#131317] border border-[#343444] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">No Collection (Vault Root)</option>
-                  {collections.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.parent_folder_id ? `└── ${c.name}` : c.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
               <div>

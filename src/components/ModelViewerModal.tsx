@@ -30,6 +30,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { ModelFile, CollectionItem } from '../types';
+import { Dropdown } from './Dropdown';
 import { apiFetch, apiSaveThumbnail, fetchFileAsUrl } from '../utils/api';
 
 interface ModelDetail {
@@ -107,6 +108,11 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   const [editDesc, setEditDesc] = useState('');
   const [editTags, setEditTags] = useState('');
   const [selectedCollectionToAdd, setSelectedCollectionToAdd] = useState('');
+
+  // WebKitGTK drops window.confirm (Tauri installs no script-dialog handler), so
+  // destructive actions use an in-app two-step confirm instead.
+  const [confirmDeleteModel, setConfirmDeleteModel] = useState(false);
+  const [confirmDeleteFileId, setConfirmDeleteFileId] = useState<string | null>(null);
 
   // Three.js internal references
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -576,7 +582,6 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   // Delete model
   const handleDeleteModel = async () => {
     if (!model) return;
-    if (!confirm(`Permanently delete "${model.title}" and all its 3D files from disk?`)) return;
 
     try {
       const res = await apiFetch(`/api/models/${model.id}`, { method: 'DELETE' });
@@ -589,7 +594,26 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
     }
   };
 
-  const isOwnerOrAdmin = model && (model.user_id === currentUserId || isAdmin);
+  // Delete a single file from this model
+  const handleDeleteFile = async (fileId: string) => {
+    if (!model) return;
+
+    try {
+      const res = await apiFetch(`/api/models/${model.id}/files/${fileId}`, { method: 'DELETE' });
+      if (res.ok) {
+        if (selectedFileId === fileId) setSelectedFileId(null);
+        await fetchModel();
+        onModelUpdated();
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error deleting file');
+    }
+  };
+
+  // No user context means the single-user desktop build, where every model is
+  // owned locally. The web server still enforces ownership on every mutation.
+  const isOwnerOrAdmin =
+    model && (currentUserId === undefined || model.user_id === currentUserId || isAdmin);
   const currentActiveFile = model?.files.find((f) => f.id === selectedFileId) || model?.files[0];
 
   return (
@@ -661,17 +685,15 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                     <Box className="w-3.5 h-3.5 text-blue-400" />
                     Viewing:
                   </span>
-                  <select
+                  <Dropdown
                     value={currentActiveFile?.id || ''}
-                    onChange={(e) => setSelectedFileId(e.target.value)}
-                    className="bg-[#121216] border border-[#35354a] rounded-lg px-2.5 py-1 text-white text-xs outline-none focus:border-blue-500 font-medium max-w-[210px] truncate"
-                  >
-                    {model.files.map((file, idx) => (
-                      <option key={file.id} value={file.id}>
-                        {idx + 1}. {file.original_name} {file.is_primary_3d === 1 ? '★ [Primary]' : ''}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setSelectedFileId}
+                    options={model.files.map((file, idx) => ({
+                      value: file.id,
+                      label: `${idx + 1}. ${file.original_name}${file.is_primary_3d === 1 ? ' ★ [Primary]' : ''}`,
+                    }))}
+                    className="bg-[#121216] border border-[#35354a] rounded-lg px-2.5 py-1 text-white text-xs outline-none focus:border-blue-500 font-medium max-w-[210px]"
+                  />
                   <span className="text-[10px] text-neutral-500 font-mono shrink-0">
                     {(model.files.findIndex((f) => f.id === currentActiveFile?.id) + 1)}/{model.files.length}
                   </span>
@@ -879,6 +901,29 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                           >
                             <Download className="w-3.5 h-3.5" />
                           </a>
+
+                          {isOwnerOrAdmin && (
+                            <button
+                              onClick={() =>
+                                confirmDeleteFileId === file.id
+                                  ? handleDeleteFile(file.id)
+                                  : setConfirmDeleteFileId(file.id)
+                              }
+                              className={`flex items-center gap-1 px-1.5 py-1 text-[10px] rounded transition-colors ${
+                                confirmDeleteFileId === file.id
+                                  ? 'text-white bg-red-600 hover:bg-red-500'
+                                  : 'text-neutral-400 hover:text-red-400 hover:bg-red-950/40'
+                              }`}
+                              title={
+                                confirmDeleteFileId === file.id
+                                  ? 'Click again to delete this file from disk'
+                                  : 'Delete this file'
+                              }
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              {confirmDeleteFileId === file.id && <span>Confirm</span>}
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -908,18 +953,20 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                 )}
 
                 <div className="flex items-center gap-2">
-                  <select
+                <div className="flex-1">
+                  <Dropdown
                     value={selectedCollectionToAdd}
-                    onChange={(e) => setSelectedCollectionToAdd(e.target.value)}
-                    className="flex-1 bg-[#141418] border border-[#30303e] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none"
-                  >
-                    <option value="">Select Folder...</option>
-                    {collections.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.parent_folder_id ? `└── ${c.name}` : c.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setSelectedCollectionToAdd}
+                    options={[
+                      { value: '', label: 'Select Folder...' },
+                      ...collections.map((c) => ({
+                        value: c.id,
+                        label: c.parent_folder_id ? `└── ${c.name}` : c.name,
+                      })),
+                    ]}
+                    className="w-full bg-[#141418] border border-[#30303e] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none"
+                  />
+                </div>
                   <button
                     onClick={handleAddToCollection}
                     disabled={!selectedCollectionToAdd}
@@ -1033,11 +1080,17 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
               {isOwnerOrAdmin && (
                 <div className="pt-2 flex justify-end">
                   <button
-                    onClick={handleDeleteModel}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-950/60 border border-red-900/50 rounded-lg transition-colors"
+                    onClick={() =>
+                      confirmDeleteModel ? handleDeleteModel() : setConfirmDeleteModel(true)
+                    }
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                      confirmDeleteModel
+                        ? 'text-white bg-red-600 hover:bg-red-500 border-red-500'
+                        : 'text-red-400 hover:text-red-300 bg-red-950/30 hover:bg-red-950/60 border-red-900/50'
+                    }`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    Delete Model Asset
+                    {confirmDeleteModel ? 'Confirm Delete' : 'Delete'}
                   </button>
                 </div>
               )}

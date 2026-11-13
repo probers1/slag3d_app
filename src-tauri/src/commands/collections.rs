@@ -11,9 +11,10 @@ pub async fn get_collections(app: AppHandle) -> Result<Vec<CollectionItem>, Stri
     let mut stmt = conn.prepare(
         r#"
         SELECT c.id, c.name, c.description, c.parent_folder_id, c.created_at,
-               COUNT(cm.model_id) as model_count
+               COUNT(m.id) as model_count
         FROM collections c
         LEFT JOIN collection_models cm ON cm.collection_id = c.id
+        LEFT JOIN models m ON m.id = cm.model_id AND m.is_deleted = 0
         WHERE c.user_id = ?
         GROUP BY c.id
         ORDER BY c.name

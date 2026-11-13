@@ -58,14 +58,27 @@ export const THREE_BUNDLE_PATH = path.join(APP_ROOT, 'lib', 'three-bundle.js');
 /**
  * Convert a public path (`/uploads/models/<id>/<file>`) into an absolute
  * filesystem path inside the uploads directory.
+ *
+ * This function is updated to sanitize the input path to prevent directory
+ * traversal attacks (e.g., using ../).
  */
 export function resolveUploadsPath(publicPath: string): string {
   const relative = publicPath.replace(/^\/+/, '');
   const prefix = 'uploads/';
-  if (relative.startsWith(prefix)) {
-    return path.join(UPLOADS_DIR, relative.slice(prefix.length));
+  if (!relative.startsWith(prefix)) {
+    // Anything outside uploads/ is not a model file; fail closed.
+    return path.join(UPLOADS_DIR, '.invalid-path');
   }
-  return path.resolve(APP_ROOT, relative);
+
+  // Resolve relative to UPLOADS_DIR, then verify the result still sits
+  // inside it. Using the separator prevents the `<dir>-evil` prefix bypass.
+  const resolved = path.resolve(UPLOADS_DIR, relative.slice(prefix.length));
+  if (resolved === UPLOADS_DIR || resolved.startsWith(UPLOADS_DIR + path.sep)) {
+    return resolved;
+  }
+
+  console.warn(`[SLAG3D] Blocked path traversal attempt: ${publicPath}`);
+  return path.join(UPLOADS_DIR, '.invalid-path');
 }
 
 /** Create the uploads directory tree if it does not exist yet. */

@@ -5,17 +5,26 @@ pub mod db;
 pub mod protocol;
 pub mod services;
 
+use rusqlite;
+
 pub fn run() {
     protocol::register_asset_protocol(Builder::default())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // Synchronously initialize the database schema on startup so the DB has tables
-            let app_handle = app.handle().clone();
-            let db_path = app_handle.path().app_data_dir().unwrap().join("vault.db");
+            // On a fresh machine the app data directory does not exist yet.
+            // SQLite cannot create parent directories, so opening the DB there
+            // would panic and leave the window blank. Create the tree first.
+            let app_dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&app_dir)?;
+            std::env::set_var("SLAG3D_APP_DATA_DIR", &app_dir);
+            crate::services::storage::ensure_dirs()?;
+
+            let db_path = app_dir.join("vault.db");
             println!("[SLAG3D] Initializing DB at: {:?}", db_path);
-            let conn = rusqlite::Connection::open(db_path).expect("failed to open db");
-            crate::db::schema::init_schema(&conn).expect("failed to init schema");
+            let conn = rusqlite::Connection::open(&db_path)?;
+            crate::db::schema::init_schema(&conn)?;
             println!("[SLAG3D] DB initialized successfully");
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -24,6 +33,7 @@ pub fn run() {
             commands::models::import_models,
             commands::models::update_model,
             commands::models::delete_model,
+            commands::models::delete_model_file,
             commands::models::toggle_favorite,
             commands::models::save_thumbnail,
             commands::models::fetch_file,

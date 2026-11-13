@@ -5,6 +5,7 @@ use crate::db::schema::DEFAULT_USER_ID;
 use crate::services::archive::{extract_7z, extract_zip};
 use crate::services::storage::ExtractedFile;
 use base64::{engine::general_purpose, Engine as _};
+use rusqlite::OptionalExtension;
 use std::fs;
 use std::path::Path;
 use tauri::{AppHandle, Manager};
@@ -24,6 +25,9 @@ pub async fn fetch_file(app: AppHandle, path: String) -> Result<String, String> 
 
     // Remove optional localhost/ prefix
     let relative = relative.strip_prefix("localhost/").unwrap_or(relative);
+
+    // Frontend paths carry an uploads/ prefix; uploads_dir is already <app_data>/uploads
+    let relative = relative.strip_prefix("uploads/").unwrap_or(relative);
 
     let file_path = uploads_dir.join(relative);
 
@@ -129,8 +133,9 @@ pub async fn get_models(
         where_sql
     );
 
-    let mut all_params = params_list;
-    all_params.push(DEFAULT_USER_ID.to_string());
+    // Order matters: the favorites `?` sits in the SELECT list, before the WHERE clause.
+    let mut all_params = vec![DEFAULT_USER_ID.to_string()];
+    all_params.extend(params_list);
     all_params.push(limit.to_string());
     all_params.push(offset.to_string());
 
@@ -419,6 +424,67 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
     // Soft delete
     conn.execute("UPDATE models SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?", rusqlite::params![&now, &now, &id]).map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String) -> Result<(), String> {
+    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+    
+    // Get the file to delete
+    let file = conn.query_row(
+        "SELECT file_path, is_primary_3d, original_name FROM files WHERE id = ? AND model_id = ?",
+        rusqlite::params![&file_id, &model_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,  // file_path
+                row.get::<_, i32>(1)?,     // is_primary_3d
+                row.get::<_, String>(2)?,  // original_name
+            ))
+        },
+    ).map_err(|e| e.to_string())?;
+    
+    // Delete physical file from disk
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let uploads_dir = app_data_dir.join("uploads");
+    let file_path = file.0.strip_prefix("/uploads/").unwrap_or(&file.0);
+    let full_path = uploads_dir.join(file_path);
+    
+    if full_path.exists() {
+        fs::remove_file(&full_path).map_err(|e| e.to_string())?;
+    }
+    
+    // Delete database record
+    conn.execute("DELETE FROM files WHERE id = ?", rusqlite::params![&file_id]).map_err(|e| e.to_string())?;
+    
+    // If this was the primary 3D file, select a new primary from remaining files
+    if file.1 == 1 {
+        let remaining = conn.query_row(
+            "SELECT id, file_size, original_name, file_path FROM files WHERE model_id = ? AND is_primary_3d = 0 ORDER BY file_size DESC LIMIT 1",
+            rusqlite::params![&model_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,  // id
+                    row.get::<_, i64>(1)?,     // file_size
+                    row.get::<_, String>(2)?,  // original_name
+                    row.get::<_, String>(3)?,  // file_path
+                ))
+            },
+        ).optional().map_err(|e| e.to_string())?;
+        
+        if let Some(rem) = remaining {
+            conn.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ?", rusqlite::params![&rem.0]).map_err(|e| e.to_string())?;
+            
+            // Re-queue thumbnail render for the new primary 3D file
+            // Note: In Tauri, thumbnail generation is handled differently (client-side)
+            // The frontend will re-render the thumbnail when needed
+        } else {
+            // No remaining 3D files - update thumbnail status
+            let now = chrono::Utc::now().to_rfc3339();
+            conn.execute("UPDATE models SET thumbnail_status = 'failed', updated_at = ? WHERE id = ?", rusqlite::params![&now, &model_id]).map_err(|e| e.to_string())?;
+        }
+    }
+    
     Ok(())
 }
 

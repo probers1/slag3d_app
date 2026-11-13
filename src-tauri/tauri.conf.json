@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "identifier": "slag3d",
   "build": {
-    "frontendDist": "../dist"
+    "beforeBuildCommand": "npm run build:client",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:3000"
   },
   "app": {
     "windows": [
@@ -24,6 +26,7 @@
   "bundle": {
     "active": true,
     "targets": ["appimage"],
-    "icon": ["icons/icon.png"]
+    "icon": ["icons/icon.png"],
+    "resources": ["../dist/**/*"]
   }
 }

@@ -22,7 +22,7 @@
     "test:upload-security": "tsx tests/upload_security.test.ts",
     "update": "bash scripts/update.sh",
     "tauri": "tauri",
-    "build:desktop": "npm run build && tauri build"
+    "build:desktop": "tauri build"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

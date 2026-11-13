@@ -6,6 +6,7 @@ import { ModelCard } from './components/ModelCard';
 import { CollectionsDrawer } from './components/CollectionsDrawer';
 import { UploadModal } from './components/UploadModal';
 import { ModelViewerModal } from './components/ModelViewerModal';
+import { Dropdown } from './components/Dropdown';
 import { apiFetch, apiInitDb } from './utils/api';
 
 export default function App() {
@@ -251,19 +252,15 @@ export default function App() {
                 {/* Items per page selector */}
                 <div className="flex items-center gap-1.5 text-xs text-neutral-400 pl-2">
                   <span className="hidden sm:inline">Per page:</span>
-                  <select
-                    value={itemsPerPage}
-                    onChange={(e) => {
-                      setItemsPerPage(Number(e.target.value));
+                  <Dropdown
+                    value={String(itemsPerPage)}
+                    onChange={(value) => {
+                      setItemsPerPage(Number(value));
                       setCurrentPage(1);
                     }}
-                    className="bg-[#121214] border border-[#2e2e3c] rounded-lg px-2 py-1 text-xs text-neutral-200 outline-none"
-                  >
-                    <option value={6}>6</option>
-                    <option value={12}>12</option>
-                    <option value={24}>24</option>
-                    <option value={48}>48</option>
-                  </select>
+                    options={[6, 12, 24, 48].map((n) => ({ value: String(n), label: String(n) }))}
+                    className="w-16 bg-[#121214] border border-[#2e2e3c] rounded-lg px-2 py-1 text-xs text-neutral-200 outline-none"
+                  />
                 </div>
               </div>
             </div>
@@ -427,7 +424,8 @@ export default function App() {
           onClose={() => setIsUploadOpen(false)}
           onUploadSuccess={() => {
             fetchModels();
-            fetchTags();            
+            fetchTags();
+            fetchCollections();
           }}
         />
       )}
@@ -442,6 +440,7 @@ export default function App() {
           onClose={() => setSelectedModelId(null)}
           onModelUpdated={() => {
             fetchModels();
+            fetchCollections();
           }}
         />
       )}

@@ -530,6 +530,78 @@ router.post('/:id/thumbnail-client', (req, res) => {
   }
 });
 
+// DELETE /api/models/:id/files/:fileId — Delete a single file from a model
+router.delete('/:id/files/:fileId', (req, res) => {
+  const { id, fileId } = req.params;
+  const userId = req.session.userId || (req as any).userId;
+  const userRole = req.session.userRole || (req as any).role;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized: Missing user session or token' });
+  }
+
+  const model = db.prepare('SELECT id, user_id FROM models WHERE id = ?').get(id) as { id: string; user_id: string } | undefined;
+  if (!model) {
+    return res.status(404).json({ error: 'Model not found' });
+  }
+  if (model.user_id !== userId && userRole !== 'admin') {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+
+  // Get the file to delete
+  const file = db.prepare('SELECT * FROM files WHERE id = ? AND model_id = ?').get(fileId, id) as
+    | { id: string; file_path: string; is_primary_3d: number; original_name: string }
+    | undefined;
+  if (!file) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+
+  // 1. Delete physical file from disk
+  const absPath = resolveUploadsPath(file.file_path);
+  try {
+    if (fs.existsSync(absPath)) {
+      fs.unlinkSync(absPath);
+    }
+  } catch (err) {
+    console.warn(`Failed to delete file ${absPath}:`, err);
+  }
+
+  // 2. Delete database record
+  db.prepare('DELETE FROM files WHERE id = ?').run(fileId);
+
+  // 3. If this was the primary 3D file, select a new primary from remaining files
+  if (file.is_primary_3d === 1) {
+    const remaining = db.prepare(`
+      SELECT id, file_size, original_name, file_path
+      FROM files
+      WHERE model_id = ? AND is_primary_3d = 0
+      ORDER BY file_size DESC
+      LIMIT 1
+    `).get(id) as { id: string; file_size: number; original_name: string; file_path: string } | undefined;
+
+    if (remaining) {
+      db.prepare('UPDATE files SET is_primary_3d = 1 WHERE id = ?').run(remaining.id);
+
+      // Re-queue thumbnail render for the new primary 3D file
+      const primaryExt = path.extname(remaining.original_name).toLowerCase().replace('.', '') as 'stl' | 'obj' | '3mf';
+      const relativeOrAbs = resolveUploadsPath(remaining.file_path);
+      enqueueThumbnailRender({
+        modelId: id,
+        filePath: relativeOrAbs,
+        fileType: ['stl', 'obj', '3mf'].includes(primaryExt) ? primaryExt : 'stl',
+      });
+    } else {
+      // No remaining 3D files - update thumbnail status to indicate no primary
+      db.prepare(`
+        UPDATE models
+        SET thumbnail_status = 'failed', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(id);
+    }
+  }
+
+  res.json({ message: `File "${file.original_name}" deleted successfully` });
+});
+
 // POST /api/models/:id/files — Add additional 3D files to an existing model
 router.post('/:id/files', uploadLimiter, uploadMiddleware.array('files', 10), async (req, res) => {
   const { id } = req.params;

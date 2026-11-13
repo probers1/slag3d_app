@@ -67,6 +67,10 @@ export async function apiDeleteModel(id: string) {
   await invoke('delete_model', { id });
 }
 
+export async function apiDeleteModelFile(modelId: string, fileId: string) {
+  await invoke('delete_model_file', { modelId, fileId });
+}
+
 export async function apiToggleFavorite(id: string) {
   const isFavorited = await invoke<boolean>('toggle_favorite', { id });
   return { is_favorited: isFavorited };
@@ -76,7 +80,7 @@ export async function apiSaveThumbnail(id: string, imageBase64: string) {
   // imageBase64 is a data URL, strip prefix if present
   const base64 = imageBase64.startsWith('data:') ? imageBase64.split(',')[1] : imageBase64;
   const path = await invoke<string>('save_thumbnail', { id, imageBase64: base64 });
-  return { thumbnail_path: path };
+  return { thumbnail_path: mapAssetPaths(path) };
 }
 
 export async function apiGetCollections() {
@@ -160,7 +164,7 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
       const data = await apiGetTags();
       return makeResponse({ tags: data });
     }
-    if (pathname.startsWith('/api/models') && method === 'GET') {
+    if (pathname === '/api/models' && method === 'GET') {
       const page = Number(params.get('page') || '1');
       const limit = Number(params.get('limit') || '12');
       const search = params.get('search') || undefined;
@@ -200,6 +204,12 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
     if (pathname.match(/^\/api\/models\/[^/]+$/) && method === 'DELETE') {
       const id = pathname.split('/')[3];
       await apiDeleteModel(id);
+      return makeResponse({ ok: true });
+    }
+    // DELETE /api/models/{id}/files/{fileId}
+    if (pathname.match(/^\/api\/models\/[^/]+\/files\/[^/]+$/) && method === 'DELETE') {
+      const parts = pathname.split('/');
+      await apiDeleteModelFile(parts[3], parts[5]);
       return makeResponse({ ok: true });
     }
     // POST /api/models/{id}/files — supplementary file upload

@@ -13,6 +13,20 @@ export function sleep(ms: number) {
 }
 
 export function enqueueThumbnailRender(job: RenderJobData) {
+  // Skip a duplicate while a render is already in flight. A 'processing' row
+  // older than 5 minutes is assumed to be from a crashed run and is retried.
+  const current = db.prepare(`
+    SELECT thumbnail_status, updated_at FROM models WHERE id = ?
+  `).get(job.modelId) as { thumbnail_status: string; updated_at: string } | undefined;
+
+  if (current?.thumbnail_status === 'processing') {
+    const startedMs = Date.parse(current.updated_at.replace(' ', 'T') + 'Z');
+    if (Number.isFinite(startedMs) && Date.now() - startedMs < 5 * 60 * 1000) {
+      console.log(`[SLAG3D Queue] Render already in progress for model ${job.modelId}; skipping duplicate.`);
+      return;
+    }
+  }
+
   // Update status to pending
   db.prepare(`
     UPDATE models 

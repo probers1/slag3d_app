@@ -46,6 +46,15 @@ if (!password) {
   fail('No password provided. Set ADMIN_PASSWORD in .env or pass a password as the first argument.');
 }
 
+// --- START SECURITY ENHANCEMENT ---
+const MIN_PASSWORD_LENGTH = 12;
+if (password.length < MIN_PASSWORD_LENGTH) {
+  fail(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long.`);
+}
+// Basic check for complexity (optional, but good practice)
+// We only check length for simplicity, as per the audit finding.
+// --- END SECURITY ENHANCEMENT ---
+
 const db = new Database(dbPath);
 db.pragma('busy_timeout = 5000');
 

@@ -79,26 +79,25 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
     for i in 0..archive.len() {
         let mut file_entry = archive.by_index(i)?;
         let file_name = file_entry.name().to_string();
-        
+
         // Skip directories
-        if file_entry.is_dir() {
+        if file_entry.is_dir() || file_name.ends_with('/') || file_name.ends_with('\\') {
             continue;
         }
-        
-        // Security: prevent path traversal
-        let dest_path = model_dir.join(&file_name);
-        if !is_safe_path(&model_dir, &dest_path) {
-            continue;
-        }
-        
-        // Only extract allowed extensions
+
+        // Only extract allowed extensions (.stl, .3mf, .obj)
         if !is_allowed_extension(&file_name) {
             continue;
         }
-        
-        // Create parent directories
-        if let Some(parent) = dest_path.parent() {
-            fs::create_dir_all(parent)?;
+
+        // Flatten file structure into model_dir to avoid deep subfolder hierarchy path issues in public_path
+        let base_filename = Path::new(&file_name).file_name().unwrap_or_default();
+        let dest_path = model_dir.join(base_filename);
+        let safe_filename = base_filename.to_string_lossy().to_string();
+
+        // Security: prevent path traversal
+        if !is_safe_path(&model_dir, &dest_path) {
+            continue;
         }
         
         let mut output_file = fs::File::create(&dest_path)?;
@@ -106,7 +105,7 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
         
         let size = fs::metadata(&dest_path)?.len();
         extracted_files.push(ExtractedFile {
-            filename: PathBuf::from(&file_name).file_name().unwrap().to_string_lossy().to_string(),
+            filename: safe_filename,
             destination_path: dest_path,
             size,
         });
@@ -133,34 +132,33 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
         |entry, reader, _dest_path| {
             let file_name = entry.name().to_string();
             
-            // Skip directories
-            if entry.is_directory() {
+            // Skip directories (some archives mark dirs explicitly, others end with /)
+            if entry.is_directory() || file_name.ends_with('/') || file_name.ends_with('\\') {
                 return Ok(true);
             }
-            
-            // Only extract allowed extensions
+
+            // Only extract allowed extensions (.stl, .3mf, .obj)
             if !is_allowed_extension(&file_name) {
                 return Ok(false);
             }
-            
+
+            // Flatten file structure into model_dir to avoid deep subfolder hierarchy path issues in public_path
+            let base_filename = Path::new(&file_name).file_name().unwrap_or_default();
+            let safe_filename = base_filename.to_string_lossy().to_string();
+            let safe_dest = model_dir.join(&safe_filename);
+
             // Security: prevent path traversal
-            let safe_dest = model_dir.join(file_name.trim_start_matches('/'));
             if !is_safe_path(&model_dir, &safe_dest) {
                 return Ok(false);
             }
-            
-            // Create parent directories
-            if let Some(parent) = safe_dest.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            
+
             // Extract file data
             let mut file_data = Vec::new();
             if reader.read_to_end(&mut file_data).is_ok() {
                 let _ = fs::write(&safe_dest, &file_data);
                 let size = file_data.len() as u64;
                 filtered_extracted.push(ExtractedFile {
-                    filename: PathBuf::from(&file_name).file_name().unwrap().to_string_lossy().to_string(),
+                    filename: safe_filename,
                     destination_path: safe_dest.clone(),
                     size,
                 });
