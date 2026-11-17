@@ -15,7 +15,7 @@ function toAssetUrl(path: string): string {
   if (path.startsWith('/uploads/')) {
     // Protocol handler expects: slag3d-asset://uploads/thumbnails/{id}.png
     // (no leading slash after the scheme — it strips "uploads/" prefix)
-    return `slag3d-asset://${path.replace(/^\//, '')}`;
+    return `slag3d-asset://uploads${path.slice('/uploads'.length)}`;
   }
   return path;
 }
