@@ -617,12 +617,16 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
 
     // Accept either the mapped `slag3d-asset://uploads/...` form or a raw
     // `/uploads/...` / `uploads/...` public path.
+    // Chain each strip_prefix with its own fallback to the intermediate
+    // result — falling back to the original `path` after a failed strip
+    // would re-introduce the scheme prefix and break resolution.
     let relative = path
         .strip_prefix("slag3d-asset://")
         .or_else(|| path.strip_prefix("slag3d-asset:"))
-        .unwrap_or(&path)
+        .unwrap_or(&path);
+    let relative = relative
         .strip_prefix("localhost/")
-        .unwrap_or(&path)
+        .unwrap_or(relative)
         .trim_start_matches('/');
     // Drop the leading `uploads/` so we join directly under uploads_dir.
     let relative = relative.strip_prefix("uploads/").unwrap_or(relative);
