@@ -2,11 +2,26 @@ import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { renderThumbnailInBrowser } from './clientThumbnailRenderer';
 
+// Detect if running inside Tauri at runtime
+const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
+
+/**
+ * Convert a public /uploads/... path to the Tauri custom-protocol URL.
+ * Only applies to thumbnail paths (/uploads/thumbnails/...) since model files
+ * are loaded via fetchFileAsBlobUrl -> blob URL.
+ */
+function toAssetUrl(path: string): string {
+  if (!isTauri) return path;
+  if (path.startsWith('/uploads/thumbnails/')) {
+    return `slag3d-asset://${path}`;
+  }
+  return path;
+}
+
 function mapAssetPaths(value: any): any {
   if (typeof value === 'string') {
-    // Keep original public paths (e.g. /uploads/models/.../file.stl) unchanged.
-    // The frontend will resolve them via invoke('read_file', ...) -> blob URL.
-    return value;
+    // Convert thumbnail paths to custom protocol URLs in Tauri mode
+    return toAssetUrl(value);
   }
   if (Array.isArray(value)) {
     return value.map(mapAssetPaths);
