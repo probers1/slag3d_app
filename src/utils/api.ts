@@ -12,8 +12,10 @@ const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TA
  */
 function toAssetUrl(path: string): string {
   if (!isTauri) return path;
-  if (path.startsWith('/uploads/thumbnails/')) {
-    return `slag3d-asset://${path}`;
+  if (path.startsWith('/uploads/')) {
+    // Protocol handler expects: slag3d-asset://uploads/thumbnails/{id}.png
+    // (no leading slash after the scheme — it strips "uploads/" prefix)
+    return `slag3d-asset://${path.replace(/^\//, '')}`;
   }
   return path;
 }
