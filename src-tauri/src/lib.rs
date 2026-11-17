@@ -22,6 +22,12 @@ pub fn run() {
             let db_path = app_dir.join("vault.db");
             println!("[SLAG3D] Initializing DB at: {:?}", db_path);
             let conn = rusqlite::Connection::open(&db_path)?;
+            // Without a busy_timeout, concurrent writes (unlikely in a
+            // single-user desktop app, but real during thumbnail renders that
+            // update the same row) would return SQLITE_BUSY immediately and
+            // leave the UI spinning. Five seconds is generous enough to wait
+            // out any short-lived writer instead of failing outright.
+            conn.busy_timeout(std::time::Duration::from_millis(5000))?;
             crate::db::schema::init_schema(&conn)?;
             println!("[SLAG3D] DB initialized successfully");
 

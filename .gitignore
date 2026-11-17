@@ -6,6 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+# AppImage / LinuxDeploy extraction tree (build junk, ~560 files / 15MB)
+squashfs-root/
+
 # Local Docker secrets — never commit real secret values
 secrets/session_secret.txt
 /data/*.db

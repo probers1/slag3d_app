@@ -55,5 +55,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # SECURITY FIX #1: Startup validation — the container WILL NOT start without valid secrets.
 # Validation runs at container start (not build time) because the secrets are
 # injected as runtime environment variables.
-COPY ./startup-validation.js ./startup-validation.js
+#
+# The validation script is tracked under server/, not at the repo root, so
+# copy it from there (previously this COPY referenced ./startup-validation.js
+# at the root, which doesn't exist and made `docker build` fail).
+COPY ./server/startup-validation.js ./startup-validation.js
 CMD ["sh", "-c", "node ./startup-validation.js && npm start"]

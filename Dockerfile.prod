@@ -69,7 +69,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # SECURITY FIX #1: Startup validation
 # This script runs at container boot and blocks startup if secrets are missing.
-COPY startup-validation.js ./startup-validation.js
+# Tracked under server/, not at the repo root — copy from there.
+COPY server/startup-validation.js ./startup-validation.js
 
 LABEL com.github.dockerlab.security.fix="secret-enforcement" \
       com.github.dockerlab.security.version="2026-11-02" \

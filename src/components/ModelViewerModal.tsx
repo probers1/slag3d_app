@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { ModelFile, CollectionItem } from '../types';
 import { Dropdown } from './Dropdown';
-import { apiFetch, apiSaveThumbnail, fetchFileAsBlobUrl } from '../utils/api';
+import { apiFetch, apiSaveThumbnail, fetchFileAsBlobUrl, apiAddModelFiles } from '../utils/api';
 
 interface ModelDetail {
   id: string;
@@ -67,7 +67,6 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   onModelUpdated,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Model data state
   const [model, setModel] = useState<ModelDetail | null>(null);
@@ -569,21 +568,22 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
     }
   };
 
-  // Upload supplementary files
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const form = new FormData();
-    for (const f of files) form.append('files', f as File);
-
+  // Upload supplementary files.
+  //
+  // In the Tauri desktop build there is no multipart upload — the web
+  // `<input type="file">` cannot hand raw disk paths to Rust. We use the
+  // native Tauri dialog plugin instead, then route the selected paths through
+  // the `add_model_files` IPC command (see `apiAddModelFiles`).
+  const handleFileUpload = async () => {
     try {
       const res = await apiFetch(`/api/models/${modelId}/files`, {
         method: 'POST',
-        body: form,
       });
 
-      if (!res.ok) throw new Error('Upload failed');
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Upload failed');
+      }
 
       await fetchModel();
       onModelUpdated();
@@ -591,8 +591,6 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       setTimeout(() => setSaveToast(null), 2500);
     } catch (err: any) {
       alert(err.message || 'Error uploading files');
-    } finally {
-      if (e.target) e.target.value = '';
     }
   };
 
@@ -1078,17 +1076,8 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                   <FolderPlus className="w-4 h-4 text-blue-400" /> Add Additional Files
                 </h3>
 
-                <input
-                  type="file"
-                  multiple
-                  accept=".stl,.3mf,.obj,.zip,.7z"
-                  ref={fileInputRef}
-                  className="hidden"
-                  onChange={handleFileUpload}
-                />
-
                 <button
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={handleFileUpload}
                   disabled={loading}
                   className="flex items-center gap-1.5 px-5 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-500 rounded-lg justify-center transition-colors"
                 >

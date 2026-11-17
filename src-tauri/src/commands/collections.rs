@@ -144,5 +144,7 @@ pub async fn remove_model_from_collection(app: AppHandle, collection_id: String,
 fn get_db_connection(app: &AppHandle) -> rusqlite::Result<rusqlite::Connection> {
     let path_resolver = app.path();
     let db_path = path_resolver.app_data_dir().unwrap().join("vault.db");
-    rusqlite::Connection::open(db_path)
+    let conn = rusqlite::Connection::open(db_path)?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    Ok(conn)
 }

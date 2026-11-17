@@ -14,7 +14,9 @@ use uuid::Uuid;
 fn get_db_connection(app: &AppHandle) -> rusqlite::Result<rusqlite::Connection> {
     let path_resolver = app.path();
     let db_path = path_resolver.app_data_dir().unwrap().join("vault.db");
-    rusqlite::Connection::open(db_path)
+    let conn = rusqlite::Connection::open(db_path)?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+    Ok(conn)
 }
 
 #[tauri::command]
@@ -483,11 +485,42 @@ pub async fn add_model_files(
 
 #[tauri::command]
 pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
+    // Hard delete — matches the Express server's `DELETE /api/models/:id`
+    // (purge files from disk, then cascade the DB row). The spec for the
+    // Tauri build also specifies "Removes DB records and deletes files from
+    // disk" (design doc §5.2), so soft-delete was an implementation
+    // inconsistency with the server. Aligning on hard delete means the same
+    // model can never be recovered from either surface.
+    let mut conn = get_db_connection(&app).map_err(|e| e.to_string())?;
 
-    // Soft delete
-    conn.execute("UPDATE models SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE id = ?", rusqlite::params![&now, &now, &id]).map_err(|e| e.to_string())?;
+    // 1. Purge model files directory
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let models_dir = app_data_dir.join("uploads").join("models").join(&id);
+    if models_dir.exists() {
+        fs::remove_dir_all(&models_dir).map_err(|e| e.to_string())?;
+    }
+
+    // 2. Purge cached thumbnail
+    let thumb_path = app_data_dir.join("uploads").join("thumbnails").join(format!("{}.png", id));
+    if thumb_path.exists() {
+        fs::remove_file(&thumb_path).map_err(|e| e.to_string())?;
+    }
+
+    // 3. Delete database record. The Tauri schema declares `files.model_id`
+    // etc. without REFERENCES, so SQLite won't cascade — clean up the
+    // dependents explicitly or they'd orphan.
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM model_tags WHERE model_id = ?", rusqlite::params![&id])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM favorites WHERE model_id = ?", rusqlite::params![&id])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM collection_models WHERE model_id = ?", rusqlite::params![&id])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM files WHERE model_id = ?", rusqlite::params![&id])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM models WHERE id = ?", rusqlite::params![&id])
+        .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
 
     Ok(())
 }

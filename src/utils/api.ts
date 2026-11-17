@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { renderThumbnailInBrowser } from './clientThumbnailRenderer';
 
 function mapAssetPaths(value: any): any {
   if (typeof value === 'string') {
@@ -129,6 +130,22 @@ export async function apiInitDb() {
   await invoke('init_db');
 }
 
+/**
+ * Supplementary file upload (mirrors `POST /api/models/{id}/files`).
+ *
+ * The Express server accepted a multipart FormData body; in Tauri we cannot
+ * ship `File` objects over IPC, so we open the native OS dialog here and pass
+ * the selected paths straight to the `add_model_files` Rust command.
+ */
+export async function apiAddModelFiles(modelId: string) {
+  const files = await pickFiles(true, ['stl', '3mf', 'obj', 'zip', '7z']);
+  if (files.length === 0) {
+    return { ok: true, added: [] };
+  }
+  const added = await invoke<any[]>('add_model_files', { modelId, filePaths: files });
+  return { ok: true, added };
+}
+
 // Read an uploaded asset file via Tauri and return a blob URL.
 // Caller must revoke the URL when done (use try/finally).
 export async function fetchFileAsBlobUrl(path: string): Promise<string> {
@@ -140,6 +157,9 @@ export async function fetchFileAsBlobUrl(path: string): Promise<string> {
   }
   return URL.createObjectURL(new Blob([bytes]));
 }
+
+// Re-export client-side thumbnail renderer for use after uploads
+export { renderThumbnailInBrowser } from './clientThumbnailRenderer';
 
 export async function apiFetch(url: string, options: RequestInit = {}) {
   const method = (options.method || 'GET').toUpperCase();
@@ -178,8 +198,13 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
       const data = await apiToggleFavorite(id);
       return makeResponse(data);
     }
+    // POST /api/models/{id}/regenerate-thumbnail — in Tauri, thumbnails are
+    // rendered client-side (WebGL) on demand. The ModelCard retry button sets
+    // thumbnail_status to 'pending', which triggers the auto-render useEffect.
+    // This route is intentionally a no-op here; the real work happens in the
+    // browser, not on a server-side queue.
     if (pathname.match(/^\/api\/models\/[^/]+\/regenerate-thumbnail$/) && method === 'POST') {
-      return makeResponse({});
+      return makeResponse({ ok: true });
     }
     // GET /api/models/{id} — model detail (viewer, edit)
     if (pathname.match(/^\/api\/models\/[^/]+$/) && method === 'GET') {
@@ -211,22 +236,14 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
       await apiDeleteModelFile(parts[3], parts[5]);
       return makeResponse({ ok: true });
     }
-    // POST /api/models/{id}/files — supplementary file upload
+    // POST /api/models/{id}/files — supplementary file upload.
+    // The Express server accepted a multipart FormData body; in Tauri we cannot
+    // ship File objects over IPC, so we open the native OS dialog here and pass
+    // the selected paths straight to the `add_model_files` Rust command.
     if (pathname.match(/^\/api\/models\/[^/]+\/files$/) && method === 'POST') {
       const id = pathname.split('/')[3];
-      // Forward form data via Tauri command (file paths from dialog)
-      const form = options.body as FormData;
-      const files: string[] = [];
-      if (form && typeof form.entries === 'function') {
-        for (const [key, value] of form.entries()) {
-          if (key === 'files' && value instanceof File) {
-            // Tauri can't receive File objects; use the web dialog path instead
-            files.push((value as File).name);
-          }
-        }
-      }
-      // TODO supplement upload: invoke('add_model_files', { modelId: id, filePaths: files }) — FormData-to-FileMap shim
-      return makeResponse({ ok: true });
+      const data = await apiAddModelFiles(id);
+      return makeResponse(data);
     }
     if (pathname === '/api/collections' && method === 'POST') {
       const body = options.body ? JSON.parse(options.body as string) : {};
@@ -250,8 +267,12 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
       await apiAddModelToCollection(collectionId, body.model_id);
       return makeResponse({ ok: true });
     }
-    // Fallback for unhandled routes
-    return makeResponse({});
+    // Fallback for unhandled routes.
+    // Fail loudly instead of silently returning 200 — a typo in a pathname
+    // regex above would otherwise become a silent no-op that's very hard to
+    // debug (see audit issue #12).
+    console.warn(`[apiFetch] Unhandled route: ${method} ${pathname}`);
+    return { ok: false, status: 404, json: async () => ({ error: `Unhandled Tauri route: ${method} ${pathname}` }), text: async () => '' };
   } catch (e) {
     return { ok: false, status: 500, json: async () => ({ error: (e as Error).message }) };
   }

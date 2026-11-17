@@ -134,11 +134,45 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [&DEFAULT_USER_ID, "", "", "user"],
     )?;
 
+    // Migration v5b: the server's v4 migration only added `is_deleted` to the
+    // `users` table; the Tauri app filters `models.is_deleted = 0` in every
+    // query, so a v4 database migrated to Tauri would crash on first load.
+    // Add the column (and `deleted_at`) idempotently so an existing v4 vault
+    // upgrades in place without losing data.
+    add_soft_delete_columns(conn, "models")?;
+    add_soft_delete_columns(conn, "files")?;
+    add_soft_delete_columns(conn, "collections")?;
+
     // Set schema version to 5 (upsert)
     conn.execute_batch(
         "INSERT INTO schema_versions (id, version) VALUES (1, 5)
          ON CONFLICT(id) DO UPDATE SET version = 5;",
     )?;
 
+    Ok(())
+}
+
+/// Add `is_deleted` / `deleted_at` columns to `table` if they are missing.
+/// Safe to call on tables that already have the columns (no-op).
+fn add_soft_delete_columns(conn: &Connection, table: &str) -> Result<()> {
+    // PRAGMA table_info returns columns: cid, name, type, notnull, dflt_value, pk
+    // The column name is at index 1 (name), not 0 (cid).
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
+    let names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if !names.iter().any(|c| c == "is_deleted") {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {} ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
+            table
+        ))?;
+    }
+    if !names.iter().any(|c| c == "deleted_at") {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {} ADD COLUMN deleted_at TEXT",
+            table
+        ))?;
+    }
     Ok(())
 }

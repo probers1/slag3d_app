@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Upload, FileCode, CheckCircle, AlertCircle } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { CollectionItem } from '../types';
-import { apiImportModels, pickFiles } from '../utils/api';
+import { apiImportModels, pickFiles, renderThumbnailInBrowser } from '../utils/api';
 import { Dropdown } from './Dropdown';
 
 interface UploadModalProps {
@@ -53,7 +53,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     setIsUploading(true);
     setUploadError(null);
     try {
-      await apiImportModels(selectedPaths, title, description, tags, collectionId || undefined);
+      const model = await apiImportModels(selectedPaths, title, description, tags, collectionId || undefined);
+      // Trigger client-side thumbnail generation for the new model
+      if (model.primary_file?.file_path) {
+        renderThumbnailInBrowser(model.id, model.primary_file.file_path);
+      }
       onUploadSuccess();
       onClose();
     } catch (err: any) {
