@@ -77,7 +77,7 @@ jobs:
           targets: x86_64-pc-windows-gnu
 
       - name: Install npm dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build Tauri app
         run: npm run tauri build -- --target x86_64-pc-windows-gnu
