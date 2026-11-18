@@ -77,13 +77,24 @@ fn handle_asset_request<R: Runtime>(
 }
 
 fn extract_path_from_uri(uri: &str) -> Option<String> {
-    // Remove the scheme
-    let without_scheme = uri.strip_prefix("slag3d-asset://")?;
-
-    // Handle optional "localhost" prefix
-    let path_part = without_scheme
-        .strip_prefix("localhost/")
-        .unwrap_or(without_scheme);
+    // Strip the scheme + authority prefix, handling both platform formats:
+    //   Linux:   slag3d-asset://localhost/uploads/thumbnails/x.png
+    //   Windows: http://slag3d-asset.localhost/uploads/thumbnails/x.png
+    //
+    // On Windows/Android Tauri serves the custom scheme via
+    // http://{scheme}.localhost, so the request URI carries the http(s) scheme
+    // with slag3d-asset.localhost as the host. Strip that prefix explicitly.
+    let path_part = if let Some(rest) = uri.strip_prefix("slag3d-asset://") {
+        // slag3d-asset://localhost/uploads/... or slag3d-asset://uploads/...
+        rest.strip_prefix("localhost/").unwrap_or(rest)
+    } else if let Some(rest) = uri.strip_prefix("http://slag3d-asset.localhost/") {
+        rest
+    } else if let Some(rest) = uri.strip_prefix("https://slag3d-asset.localhost/") {
+        rest
+    } else {
+        // Unknown scheme — refuse rather than guess.
+        return None;
+    };
 
     // Strip query parameters (cache-busting like ?v=123)
     let path_only = path_part.split('?').next().unwrap_or(path_part);
