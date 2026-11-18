@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::fs;
 use crate::services::storage::{is_allowed_extension, ExtractedFile, get_model_dir};
 
@@ -46,29 +46,32 @@ impl std::fmt::Display for ArchiveError {
 impl std::error::Error for ArchiveError {}
 
 pub fn is_safe_path(base: &Path, path: &Path) -> bool {
-    // Canonicalize both paths. If canonicalization fails, the path likely
-    // doesn't exist yet (e.g. a fresh extraction destination). In that case
-    // we fall back to a component-by-component traversal check.
-    let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let base_canonical = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+    // Try canonicalized comparison first (works when both paths exist).
+    if let (Ok(normalized), Ok(base_canonical)) = (
+        path.canonicalize(),
+        base.canonicalize(),
+    ) {
+        return normalized.starts_with(&base_canonical);
+    }
 
-    if normalized.starts_with(&base_canonical) {
+    // Fallback: normalize path separators and do a string prefix check.
+    // On Windows, canonicalize() may prepend a \\?\ long-path prefix to
+    // existing directories while the non-existent file path keeps its
+    // plain form, so a starts_with() on the raw canonicalized values
+    // would fail even for perfectly safe paths.
+    let base_norm = base.to_string_lossy().replace('\\', "/");
+    let path_norm = path.to_string_lossy().replace('\\', "/");
+    if path_norm.starts_with(&base_norm) {
         return true;
     }
 
-    // Fallback: check components for path traversal
-    if path.is_absolute() {
-        return false;
-    }
-    let mut current = PathBuf::new();
+    // Reject any path that climbs above the base via .. components.
     for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => return false,
-            std::path::Component::CurDir => continue,
-            _ => current.push(component),
+        if component == std::path::Component::ParentDir {
+            return false;
         }
     }
-    !current.to_string_lossy().contains("..")
+    true
 }
 
 pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFile>, ArchiveError> {

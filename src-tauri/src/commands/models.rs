@@ -623,9 +623,6 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
 
     // Accept either the mapped `slag3d-asset://uploads/...` form or a raw
     // `/uploads/...` / `uploads/...` public path.
-    // Chain each strip_prefix with its own fallback to the intermediate
-    // result — falling back to the original `path` after a failed strip
-    // would re-introduce the scheme prefix and break resolution.
     let relative = path
         .strip_prefix("slag3d-asset://")
         .or_else(|| path.strip_prefix("slag3d-asset:"))
@@ -640,14 +637,28 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
     let file_path = uploads_dir.join(relative);
 
     // Security: the resolved path must stay inside the uploads tree.
+    // On Windows, canonicalize() may prepend a \\?\ long-path prefix, so
+    // compare using the normalized string form instead of raw Path::starts_with.
     let canonical_uploads = fs::canonicalize(&uploads_dir).map_err(|e| e.to_string())?;
     let canonical_file = fs::canonicalize(&file_path).map_err(|e| e.to_string())?;
-    if !canonical_file.starts_with(&canonical_uploads) || !canonical_file.is_file() {
+    if !path_starts_with(&canonical_file, &canonical_uploads) || !canonical_file.is_file() {
         return Err("Access denied".to_string());
     }
 
     let content = fs::read(&canonical_file).map_err(|e| e.to_string())?;
     Ok(general_purpose::STANDARD.encode(&content))
+}
+
+/// Compare two paths for prefix containment, normalizing Windows \\?\ long-path
+/// prefixes so a canonicalized existing directory and a plain file path
+/// compare correctly.
+fn path_starts_with(path: &Path, base: &Path) -> bool {
+    let p = path.to_string_lossy().replace('\\', "/");
+    let b = base.to_string_lossy().replace('\\', "/");
+    // Strip Windows \\?\ UNC prefix (e.g. \\?\C:\Users\... -> C:\Users\...)
+    let p = p.strip_prefix(r"\\?\").unwrap_or(&p);
+    let b = b.strip_prefix(r"\\?\").unwrap_or(&b);
+    p.starts_with(b)
 }
 
 #[tauri::command]
