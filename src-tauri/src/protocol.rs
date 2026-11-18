@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 use tauri::{Manager, Runtime, UriSchemeContext};
 use tauri::http::{Request, Response, StatusCode};
 use mime_guess::from_path;
@@ -37,7 +38,11 @@ fn handle_asset_request<R: Runtime>(
     // Security: ensure the path is within uploads directory
     let requested_path = uploads_dir.join(&path);
 
-    // Canonicalize to prevent directory traversal
+    // Canonicalize to prevent directory traversal.
+    // On Windows, canonicalize() prepends a \\?\ long-path prefix to
+    // existing directories but not to non-existent file paths, so a
+    // raw starts_with() on the canonicalized values would reject valid
+    // paths. Use path_starts_with() to normalize the comparison.
     let canonical_uploads = match fs::canonicalize(&uploads_dir) {
         Ok(p) => p,
         Err(_) => return not_found(),
@@ -49,7 +54,7 @@ fn handle_asset_request<R: Runtime>(
     };
 
     // Ensure the requested path is within uploads directory
-    if !canonical_requested.starts_with(&canonical_uploads) {
+    if !path_starts_with(&canonical_requested, &canonical_uploads) {
         return not_found();
     }
 
@@ -110,4 +115,18 @@ fn not_found() -> Response<Vec<u8>> {
         .header("Content-Length", body.len().to_string())
         .body(body)
         .unwrap()
+}
+
+/// Compare two paths for prefix containment, normalizing Windows \\?\ long-path
+/// prefixes so a canonicalized existing directory and a plain file path
+/// compare correctly.
+fn path_starts_with(path: &Path, base: &Path) -> bool {
+    // Strip Windows \\?\ long-path prefix BEFORE normalizing separators,
+    // otherwise the prefix becomes //?/ after the replace and won't match.
+    let p = path.to_string_lossy();
+    let p = p.strip_prefix(r"\\?\").unwrap_or(&p);
+    let b = base.to_string_lossy();
+    let b = b.strip_prefix(r"\\?\").unwrap_or(&b);
+    // Normalize backslashes to forward slashes for consistent comparison
+    p.replace('\\', "/").starts_with(&b.replace('\\', "/"))
 }
