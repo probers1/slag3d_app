@@ -22,3 +22,4 @@ secrets/session_secret.txt
 !/uploads/thumbnails/.gitkeep
 src-tauri/target/
 .aistudio/
+/src-tauri/target/release/bundle/appimage/SLAG3D - 3D Vault_1.0.0_amd64.AppImage
