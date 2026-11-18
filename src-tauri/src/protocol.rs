@@ -81,20 +81,23 @@ fn handle_asset_request<R: Runtime>(
 fn extract_path_from_uri(uri: &str) -> Option<String> {
     // Remove the scheme
     let without_scheme = uri.strip_prefix("slag3d-asset://")?;
-    
+
     // Handle optional "localhost" prefix
     let path_part = without_scheme
         .strip_prefix("localhost/")
         .unwrap_or(without_scheme);
-    
+
+    // Strip query parameters (cache-busting like ?v=123)
+    let path_only = path_part.split('?').next().unwrap_or(path_part);
+
     // URL decode the path
-    let decoded = urlencoding::decode(path_part).ok()?;
-    
+    let decoded = urlencoding::decode(path_only).ok()?;
+
     // Ensure path starts with uploads/
     if !decoded.starts_with("uploads/") {
         return None;
     }
-    
+
     // Return the relative path from uploads/
     Some(decoded["uploads/".len()..].to_string())
 }

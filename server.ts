@@ -166,6 +166,15 @@ app.use('/uploads', (req, res, next) => {
 }, express.static(UPLOADS_DIR, {
   setHeaders(res, filePath) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    // Thumbnails are overwritten in place (manual "Save as Thumbnail" capture,
+    // client-side WebGL fallback render). A stable URL means the browser would
+    // otherwise serve a stale cached PNG until the app is restarted, so they
+    // are explicitly uncacheable.
+    if (filePath.includes(`${path.sep}thumbnails${path.sep}`)) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
 
     // Thumbnails stay inline so <img> tags keep working; model files are
     // downloads only (Three.js loads them via XHR, which is unaffected).

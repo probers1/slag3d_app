@@ -134,6 +134,23 @@ export default function App() {
     }
   };
 
+  // Update a model's thumbnail in the grid after a client-side render (e.g.
+  // the "Save as Thumbnail" capture in the viewer). The saved PNG lives at a
+  // stable URL, so we stamp a cache-busting query param onto the path —
+  // otherwise the browser keeps serving the old cached image until restart.
+  const handleThumbnailUpdated = useCallback(
+    (id: string, thumb: string) => {
+      setModels((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? { ...item, thumbnail_path: `${thumb}${thumb.includes('?') ? '&' : '?'}v=${Date.now()}`, thumbnail_status: 'completed' }
+            : item
+        )
+      );
+    },
+    []
+  );
+
   // Collection CRUD handlers
   const handleCreateCollection = async (name: string, description: string, parentId: string | null) => {
     try {
@@ -363,13 +380,7 @@ export default function App() {
                         onSelect={(id) => setSelectedModelId(id)}
                         onToggleFavorite={handleToggleFavorite}
                         onRetryThumbnail={handleRetryThumbnail}
-                        onThumbnailUpdated={(id, thumb) => {
-                          setModels((prev) =>
-                            prev.map((item) =>
-                              item.id === id ? { ...item, thumbnail_path: thumb, thumbnail_status: 'completed' } : item
-                            )
-                          );
-                        }}
+                        onThumbnailUpdated={handleThumbnailUpdated}
                       />
                     ))}
                   </div>
@@ -438,8 +449,22 @@ export default function App() {
           modelId={selectedModelId}
           collections={collections}
           onClose={() => setSelectedModelId(null)}
-          onModelUpdated={() => {
-            fetchModels();
+          onModelUpdated={(newThumbnailPath) => {
+            // Manual "Save as Thumbnail" overwrites the PNG in place at a stable URL.
+            // For immediate dashboard update: apply cache-busting optimistically FIRST.
+            // Then fetch fresh data from server. After fetch completes, re-apply
+            // cache-busting to the updated model to prevent fetchModels() from
+            // overwriting with the server's bare URL.
+            const modelId = selectedModelId;
+            if (newThumbnailPath && modelId) {
+              handleThumbnailUpdated(modelId, newThumbnailPath);
+            }
+            fetchModels().then(() => {
+              // Re-apply cache-busting after server sync to keep the fresh thumbnail
+              if (newThumbnailPath && modelId) {
+                handleThumbnailUpdated(modelId, newThumbnailPath);
+              }
+            });
             fetchCollections();
           }}
         />

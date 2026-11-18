@@ -55,7 +55,7 @@ interface ModelViewerModalProps {
   currentUserId?: string;
   isAdmin?: boolean;
   onClose: () => void;
-  onModelUpdated: () => void;
+  onModelUpdated: (newThumbnailPath?: string | null) => void;
 }
 
 export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
@@ -474,10 +474,10 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       rendererRef.current.render(sceneRef.current, cameraRef.current);
       const dataUrl = rendererRef.current.domElement.toDataURL('image/png');
 
-      await apiSaveThumbnail(model.id, dataUrl);
+      const { thumbnail_path: newThumbPath } = await apiSaveThumbnail(model.id, dataUrl);
 
       setSaveToast('Custom thumbnail angle saved successfully!');
-      onModelUpdated();
+      onModelUpdated(newThumbPath);
       setTimeout(() => setSaveToast(null), 3000);
     } catch (err: any) {
       alert(err.message || 'Error saving thumbnail snapshot');
