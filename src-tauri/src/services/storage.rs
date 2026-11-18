@@ -11,7 +11,8 @@ pub struct ExtractedFile {
 pub fn is_allowed_extension(filename: &str) -> bool {
     let allowed = ["stl", "3mf", "obj"];
     if let Some(ext) = Path::new(filename).extension().and_then(|e| e.to_str()) {
-        allowed.contains(&ext.to_lowercase().as_str())
+        let lower = ext.to_lowercase();
+        allowed.contains(&lower.as_str())
     } else {
         false
     }

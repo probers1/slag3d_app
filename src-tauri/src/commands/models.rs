@@ -271,7 +271,10 @@ pub async fn import_models(
             },
             _ => {
                 // Single file - copy to model dir
-                let filename = path.file_name().unwrap().to_string_lossy().to_string();
+                let filename = match path.file_name() {
+                    Some(name) => name.to_string_lossy().to_string(),
+                    None => continue,
+                };
                 let dest_path = models_dir.join(&filename);
                 fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
                 let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
@@ -410,7 +413,10 @@ pub async fn add_model_files(
             "7z" => extract_7z(path, &model_id)
                 .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?,
             _ => {
-                let filename = path.file_name().unwrap().to_string_lossy().to_string();
+                let filename = match path.file_name() {
+                    Some(name) => name.to_string_lossy().to_string(),
+                    None => continue,
+                };
                 let dest_path = models_dir.join(&filename);
                 fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
                 let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();

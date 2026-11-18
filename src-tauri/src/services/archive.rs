@@ -46,24 +46,29 @@ impl std::fmt::Display for ArchiveError {
 impl std::error::Error for ArchiveError {}
 
 pub fn is_safe_path(base: &Path, path: &Path) -> bool {
+    // Canonicalize both paths. If canonicalization fails, the path likely
+    // doesn't exist yet (e.g. a fresh extraction destination). In that case
+    // we fall back to a component-by-component traversal check.
     let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    if let Ok(base_canonical) = base.canonicalize() {
-        normalized.starts_with(&base_canonical)
-    } else {
-        // Base doesn't exist yet, check relative path
-        if path.is_absolute() {
-            return false;
-        }
-        let mut current = PathBuf::new();
-        for component in path.components() {
-            match component {
-                std::path::Component::ParentDir => return false,
-                std::path::Component::CurDir => continue,
-                _ => current.push(component),
-            }
-        }
-        !current.to_string_lossy().contains("..")
+    let base_canonical = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
+
+    if normalized.starts_with(&base_canonical) {
+        return true;
     }
+
+    // Fallback: check components for path traversal
+    if path.is_absolute() {
+        return false;
+    }
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => return false,
+            std::path::Component::CurDir => continue,
+            _ => current.push(component),
+        }
+    }
+    !current.to_string_lossy().contains("..")
 }
 
 pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFile>, ArchiveError> {
@@ -72,11 +77,17 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
 
     let file = fs::File::open(archive_path)?;
     let mut archive = zip::ZipArchive::new(file)?;
-    
+
     let mut extracted_files = Vec::new();
-    
+
     for i in 0..archive.len() {
-        let mut file_entry = archive.by_index(i)?;
+        let mut file_entry = match archive.by_index(i) {
+            Ok(entry) => entry,
+            Err(e) => {
+                eprintln!("[SLAG3D ZIP] Skipping entry {}: {}", i, e);
+                continue;
+            }
+        };
         let file_name = file_entry.name().to_string();
 
         // Skip directories
@@ -90,7 +101,10 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
         }
 
         // Flatten file structure into model_dir to avoid deep subfolder hierarchy path issues in public_path
-        let base_filename = Path::new(&file_name).file_name().unwrap_or_default();
+        let base_filename = match Path::new(&file_name).file_name() {
+            Some(name) => name,
+            None => continue,
+        };
         let dest_path = model_dir.join(base_filename);
         let safe_filename = base_filename.to_string_lossy().to_string();
 
@@ -98,10 +112,19 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
         if !is_safe_path(&model_dir, &dest_path) {
             continue;
         }
-        
-        let mut output_file = fs::File::create(&dest_path)?;
-        std::io::copy(&mut file_entry, &mut output_file)?;
-        
+
+        let mut output_file = match fs::File::create(&dest_path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("[SLAG3D ZIP] Failed to create {}: {}", dest_path.display(), e);
+                continue;
+            }
+        };
+        if let Err(e) = std::io::copy(&mut file_entry, &mut output_file) {
+            eprintln!("[SLAG3D ZIP] Failed to write {}: {}", dest_path.display(), e);
+            continue;
+        }
+
         let size = fs::metadata(&dest_path)?.len();
         extracted_files.push(ExtractedFile {
             filename: safe_filename,
@@ -109,28 +132,28 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
             size,
         });
     }
-    
+
     if extracted_files.is_empty() {
         return Err(ArchiveError::NoValidFiles);
     }
-    
+
     Ok(extracted_files)
 }
 
 pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFile>, ArchiveError> {
     let model_dir = get_model_dir(model_id);
     fs::create_dir_all(&model_dir)?;
-    
+
     let file = fs::File::open(archive_path)?;
-    
+
     let mut filtered_extracted: Vec<ExtractedFile> = Vec::new();
-    
+
     sevenz_rust::decompress_with_extract_fn(
         file,
         &model_dir,
         |entry, reader, _dest_path| {
             let file_name = entry.name().to_string();
-            
+
             // Skip directories (some archives mark dirs explicitly, others end with /)
             if entry.is_directory() || file_name.ends_with('/') || file_name.ends_with('\\') {
                 return Ok(true);
@@ -142,7 +165,10 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
             }
 
             // Flatten file structure into model_dir to avoid deep subfolder hierarchy path issues in public_path
-            let base_filename = Path::new(&file_name).file_name().unwrap_or_default();
+            let base_filename = match Path::new(&file_name).file_name() {
+                Some(name) => name,
+                None => return Ok(false),
+            };
             let safe_filename = base_filename.to_string_lossy().to_string();
             let safe_dest = model_dir.join(&safe_filename);
 
@@ -154,7 +180,10 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
             // Extract file data
             let mut file_data = Vec::new();
             if reader.read_to_end(&mut file_data).is_ok() {
-                let _ = fs::write(&safe_dest, &file_data);
+                if let Err(e) = fs::write(&safe_dest, &file_data) {
+                    eprintln!("[SLAG3D 7Z] Failed to write {}: {}", safe_dest.display(), e);
+                    return Ok(true);
+                }
                 let size = file_data.len() as u64;
                 filtered_extracted.push(ExtractedFile {
                     filename: safe_filename,
@@ -162,14 +191,14 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
                     size,
                 });
             }
-            
+
             Ok(true)
         }
     )?;
-    
+
     if filtered_extracted.is_empty() {
         return Err(ArchiveError::NoValidFiles);
     }
-    
+
     Ok(filtered_extracted)
 }
