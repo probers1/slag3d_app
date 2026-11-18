@@ -7,14 +7,19 @@ import { renderThumbnailInBrowser } from './clientThumbnailRenderer';
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 
 /**
- * Convert a public /uploads/... path to the correct asset URL for the platform.
- * On Linux/macOS: returns slag3d-asset://uploads/...
- * On Windows: returns http://slag3d-asset.localhost/uploads/... (WebView2 workaround)
+ * Convert a public /uploads/thumbnails/... path to the correct asset URL for the platform.
+ * On Linux/macOS: returns slag3d-asset://uploads/thumbnails/...
+ * On Windows: returns http://slag3d-asset.localhost/uploads/thumbnails/... (WebView2 workaround)
  * Uses Tauri's convertFileSrc which handles the platform differences automatically.
+ * 
+ * NOTE: Only thumbnail paths are converted. Model file paths (/uploads/models/...)
+ * are NOT converted because they are loaded via fetchFileAsBlobUrl -> blob URL
+ * which uses the read_file Rust command that expects the original path format.
  */
 async function toAssetUrl(path: string): Promise<string> {
   if (!isTauri) return path;
-  if (!path.startsWith('/uploads/')) return path;
+  // Only convert thumbnail paths, not model file paths
+  if (!path.startsWith('/uploads/thumbnails/')) return path;
 
   // Extract the relative path from /uploads/
   const relativePath = path.slice('/uploads'.length); // e.g., /thumbnails/model.png
