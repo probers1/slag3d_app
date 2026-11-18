@@ -115,8 +115,8 @@ try {
   console.error('To fix, set an environment variable with a securely-generated random string (min 64 chars):');
   console.error('  JWT_SECRET=$(openssl rand -base64 52)');
   console.error('');
-  console.error('Then restart the container with:');
-  console.error('  docker run -e JWT_SECRET="$(openssl rand -base64 52)" ...');
+  console.error('Then restart the app with:');
+  console.error('  JWT_SECRET="$(openssl rand -base64 52)" node dist/server.js');
   process.exit(1);
 }
 

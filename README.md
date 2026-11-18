@@ -107,12 +107,6 @@ The installer generates a random admin password, stores it in `/opt/slag3D/.env`
 and prints it at the end. It also verifies that the printed credentials really
 work and re-syncs the admin account if the database contains an older password.
 
-### Docker Compose
-```bash
-docker compose up -d
-# Volumes: slag3d_data (DB), slag3d_uploads (files)
-```
-
 ---
 
 ## Default Admin Credentials

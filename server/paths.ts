@@ -39,7 +39,7 @@ export const APP_ROOT = resolveAppRoot();
  * Resolve the uploads directory.
  *
  * `UPLOADS_DIR` always wins so deployments can point at a mounted volume
- * (Docker: `/uploads`, LXC: `/opt/slag3D/uploads`).
+ * (LXC: `/opt/slag3D/uploads`).
  */
 export function resolveUploadsDir(): string {
   const configured = process.env.UPLOADS_DIR?.trim();
@@ -94,7 +94,7 @@ export function ensureUploadsDirs(): void {
 /**
  * Copy uploads that were written to the legacy location (`<cwd>/uploads`) into
  * the configured uploads directory. Keeps existing models reachable after an
- * update that changes `UPLOADS_DIR` (e.g. Docker switching to a volume).
+ * update that changes `UPLOADS_DIR` (e.g. LXC switching to a volume).
  */
 export function migrateLegacyUploads(): void {
   const legacyDir = path.resolve(process.cwd(), 'uploads');

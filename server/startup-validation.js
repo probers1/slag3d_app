@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Docker container startup validation.
+ * Security startup validation.
  *
  * Runs before the server starts and hard-blocks startup when required
  * security secrets are missing, too short, or obviously weak. This prevents
- * containers from accepting connections with placeholder credentials.
+ * the app from accepting connections with placeholder credentials.
  */
 
 const REQUIRED_ENV_VARS = [
@@ -78,13 +78,13 @@ try {
   console.error('');
   console.error(`  ${err.message}`);
   console.error('');
-  console.error('The container has been shut down to prevent insecure operation.');
+  console.error('The application has been shut down to prevent insecure operation.');
   console.error('');
   console.error('Generate strong secrets with:');
   console.error('  openssl rand -base64 52');
   console.error('');
   console.error('Then set JWT_SECRET, REFRESH_TOKEN_SECRET and SESSION_SECRET');
-  console.error('as environment variables for the container.');
+  console.error('as environment variables.');
   console.error('');
   process.exit(1);
 }

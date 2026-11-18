@@ -147,11 +147,6 @@ curl -fsSL https://raw.githubusercontent.com/slag3d/slag3d/main/scripts/install-
 systemctl status slag3d.service
 ```
 
-### Docker Compose
-```bash
-docker compose up -d  # Volumes: slag3d_data, slag3d_uploads
-```
-
 ---
 
 ## Troubleshooting
