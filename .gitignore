@@ -25,5 +25,5 @@ src-tauri/target/
 
 # Built release packages — too large for regular git (AppImage > 100MB)
 # Attach as a GitHub release asset instead of committing to the repo.
-dist-packages/*.AppImage
+
 
