@@ -19,8 +19,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' http://localhost:* https://* slag3d-asset:; connect-src 'self' http://localhost:* https://* slag3d-asset: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: slag3d-asset: http://slag3d-asset.localhost:; font-src 'self' data:; worker-src 'self' blob:;",
-      "devCsp": "default-src 'self' http://localhost:* https://* slag3d-asset:; connect-src 'self' http://localhost:* https://* slag3d-asset: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: slag3d-asset: http://slag3d-asset.localhost:; font-src 'self' data:; worker-src 'self' blob:;"
+      "csp": "default-src 'self' http://localhost:* https://* slag3d-asset:; connect-src 'self' http://localhost:* https://* slag3d-asset: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: slag3d-asset: http://slag3d-asset.*; font-src 'self' data:; worker-src 'self' blob:;",
+      "devCsp": "default-src 'self' http://localhost:* https://* slag3d-asset:; connect-src 'self' http://localhost:* https://* slag3d-asset: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: slag3d-asset: http://slag3d-asset.*; font-src 'self' data:; worker-src 'self' blob:;"
     }
   },
   "bundle": {
