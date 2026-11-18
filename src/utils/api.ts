@@ -1,4 +1,4 @@
-import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { appDataDir } from '@tauri-apps/api/path';
 import { renderThumbnailInBrowser } from './clientThumbnailRenderer';
@@ -8,28 +8,41 @@ const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TA
 
 /**
  * Convert a public /uploads/thumbnails/... path to the correct asset URL for the platform.
- * On Linux/macOS: returns slag3d-asset://uploads/thumbnails/...
+ * On Linux/macOS: returns slag3d-asset://localhost/uploads/thumbnails/...
  * On Windows: returns http://slag3d-asset.localhost/uploads/thumbnails/... (WebView2 workaround)
- * Uses Tauri's convertFileSrc which handles the platform differences automatically.
  * 
  * NOTE: Only thumbnail paths are converted. Model file paths (/uploads/models/...)
  * are NOT converted because they are loaded via fetchFileAsBlobUrl -> blob URL
  * which uses the read_file Rust command that expects the original path format.
+ * 
+ * We construct the URL manually instead of using convertFileSrc because that
+ * function prepends the origin to the full absolute path, but our custom
+ * protocol handler expects the path relative to the uploads directory.
  */
 async function toAssetUrl(path: string): Promise<string> {
   if (!isTauri) return path;
   // Only convert thumbnail paths, not model file paths
   if (!path.startsWith('/uploads/thumbnails/')) return path;
 
-  // Extract the relative path from /uploads/
-  const relativePath = path.slice('/uploads'.length); // e.g., /thumbnails/model.png
+  // Extract the relative path from /uploads/ (e.g., /thumbnails/model.png -> thumbnails/model.png)
+  const relativePath = path.slice('/uploads/'.length);
   
-  // Get the app data directory and construct the full file path
-  const dataDir = await appDataDir();
-  const fullPath = `${dataDir}/uploads${relativePath}`;
+  // Build the platform-specific origin (matches Tauri's protocol::origin logic)
+  // On Windows/Android: http://{scheme}.localhost (or https if use_https_scheme)
+  // On Linux/macOS: {scheme}://localhost
+  const isWindows = navigator.userAgent.includes('Windows');
+  const isAndroid = navigator.userAgent.includes('Android');
+  const useHttps = false; // We don't use https scheme
   
-  // Use Tauri's convertFileSrc which generates the correct URL for the platform
-  return convertFileSrc(fullPath, 'slag3d-asset');
+  let origin: string;
+  if (isWindows || isAndroid) {
+    origin = `http://slag3d-asset.localhost`;
+  } else {
+    origin = `slag3d-asset://localhost`;
+  }
+  
+  // Construct URL with relative path from uploads directory
+  return `${origin}/uploads/${relativePath}`;
 }
 
 async function mapAssetPaths(value: any): Promise<any> {
