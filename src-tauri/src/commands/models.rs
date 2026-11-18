@@ -653,12 +653,14 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
 /// prefixes so a canonicalized existing directory and a plain file path
 /// compare correctly.
 fn path_starts_with(path: &Path, base: &Path) -> bool {
-    let p = path.to_string_lossy().replace('\\', "/");
-    let b = base.to_string_lossy().replace('\\', "/");
-    // Strip Windows \\?\ UNC prefix (e.g. \\?\C:\Users\... -> C:\Users\...)
+    // Strip Windows \\?\ long-path prefix BEFORE normalizing separators,
+    // otherwise the prefix becomes //?/ after the replace and won't match.
+    let p = path.to_string_lossy();
     let p = p.strip_prefix(r"\\?\").unwrap_or(&p);
+    let b = base.to_string_lossy();
     let b = b.strip_prefix(r"\\?\").unwrap_or(&b);
-    p.starts_with(b)
+    // Normalize backslashes to forward slashes for consistent comparison
+    p.replace('\\', "/").starts_with(&b.replace('\\', "/"))
 }
 
 #[tauri::command]
