@@ -1,37 +1,44 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { appDataDir } from '@tauri-apps/api/path';
 import { renderThumbnailInBrowser } from './clientThumbnailRenderer';
 
 // Detect if running inside Tauri at runtime
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
 
 /**
- * Convert a public /uploads/... path to the Tauri custom-protocol URL.
- * Only applies to thumbnail paths (/uploads/thumbnails/...) since model files
- * are loaded via fetchFileAsBlobUrl -> blob URL.
+ * Convert a public /uploads/... path to the correct asset URL for the platform.
+ * On Linux/macOS: returns slag3d-asset://uploads/...
+ * On Windows: returns http://slag3d-asset.localhost/uploads/... (WebView2 workaround)
+ * Uses Tauri's convertFileSrc which handles the platform differences automatically.
  */
-function toAssetUrl(path: string): string {
+async function toAssetUrl(path: string): Promise<string> {
   if (!isTauri) return path;
-  if (path.startsWith('/uploads/')) {
-    // Protocol handler expects: slag3d-asset://uploads/thumbnails/{id}.png
-    // (no leading slash after the scheme — it strips "uploads/" prefix)
-    return `slag3d-asset://uploads${path.slice('/uploads'.length)}`;
-  }
-  return path;
+  if (!path.startsWith('/uploads/')) return path;
+
+  // Extract the relative path from /uploads/
+  const relativePath = path.slice('/uploads'.length); // e.g., /thumbnails/model.png
+  
+  // Get the app data directory and construct the full file path
+  const dataDir = await appDataDir();
+  const fullPath = `${dataDir}/uploads${relativePath}`;
+  
+  // Use Tauri's convertFileSrc which generates the correct URL for the platform
+  return convertFileSrc(fullPath, 'slag3d-asset');
 }
 
-function mapAssetPaths(value: any): any {
+async function mapAssetPaths(value: any): Promise<any> {
   if (typeof value === 'string') {
     // Convert thumbnail paths to custom protocol URLs in Tauri mode
     return toAssetUrl(value);
   }
   if (Array.isArray(value)) {
-    return value.map(mapAssetPaths);
+    return Promise.all(value.map(mapAssetPaths));
   }
   if (value && typeof value === 'object') {
     const out: any = {};
     for (const k in value) {
-      out[k] = mapAssetPaths(value[k]);
+      out[k] = await mapAssetPaths(value[k]);
     }
     return out;
   }
@@ -54,12 +61,12 @@ export async function apiGetModels(params: {
     collectionId: params.collectionId || null,
     filter: params.filter || null,
   });
-  return mapAssetPaths(data);
+  return await mapAssetPaths(data);
 }
 
 export async function apiGetModelDetail(id: string) {
   const data = await invoke<any>('get_model_detail', { id });
-  return mapAssetPaths(data);
+  return await mapAssetPaths(data);
 }
 
 export async function apiImportModels(filePaths: string[], title?: string, description?: string, tags?: string, collectionId?: string) {
@@ -70,7 +77,7 @@ export async function apiImportModels(filePaths: string[], title?: string, descr
     tags: tags || null,
     collectionId: collectionId || null,
   });
-  return mapAssetPaths(data);
+  return await mapAssetPaths(data);
 }
 
 export async function apiUpdateModel(id: string, payload: { title?: string; description?: string; tags?: string; primaryFileId?: string }) {
@@ -100,12 +107,12 @@ export async function apiSaveThumbnail(id: string, imageBase64: string) {
   // imageBase64 is a data URL, strip prefix if present
   const base64 = imageBase64.startsWith('data:') ? imageBase64.split(',')[1] : imageBase64;
   const path = await invoke<string>('save_thumbnail', { id, imageBase64: base64 });
-  return { thumbnail_path: mapAssetPaths(path) };
+  return { thumbnail_path: await mapAssetPaths(path) };
 }
 
 export async function apiGetCollections() {
   const data = await invoke<any[]>('get_collections');
-  return mapAssetPaths(data);
+  return await mapAssetPaths(data);
 }
 
 export async function apiCreateCollection(name: string, description: string, parentId: string | null) {
@@ -130,7 +137,7 @@ export async function apiAddModelToCollection(collectionId: string, modelId: str
 
 export async function apiGetTags() {
   const data = await invoke<any[]>('get_tags');
-  return mapAssetPaths(data);
+  return await mapAssetPaths(data);
 }
 
 export async function pickFiles(multiple = true, filters?: string[]) {
