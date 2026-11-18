@@ -35,42 +35,35 @@ fn handle_asset_request<R: Runtime>(
     };
     let uploads_dir = app_data_dir.join("uploads");
 
-    // Security: ensure the path is within uploads directory
+    // Security: ensure the path is within uploads directory.
+    // The path was already validated by extract_path_from_uri to start
+    // with "uploads/" and not contain ".." components. We do a string-
+    // based containment check instead of canonicalize()+starts_with()
+    // because on Windows canonicalize() prepends a \\?\ long-path prefix
+    // to existing directories but not to non-existent file paths, which
+    // breaks the prefix comparison.
     let requested_path = uploads_dir.join(&path);
 
-    // Canonicalize to prevent directory traversal.
-    // On Windows, canonicalize() prepends a \\?\ long-path prefix to
-    // existing directories but not to non-existent file paths, so a
-    // raw starts_with() on the canonicalized values would reject valid
-    // paths. Use path_starts_with() to normalize the comparison.
-    let canonical_uploads = match fs::canonicalize(&uploads_dir) {
-        Ok(p) => p,
-        Err(_) => return not_found(),
-    };
-
-    let canonical_requested = match fs::canonicalize(&requested_path) {
-        Ok(p) => p,
-        Err(_) => return not_found(),
-    };
-
-    // Ensure the requested path is within uploads directory
-    if !path_starts_with(&canonical_requested, &canonical_uploads) {
+    // Verify the resolved path stays within the uploads directory using
+    // normalized string comparison (handles Windows \\?\ prefixes and
+    // mixed separators).
+    if !path_within_dir(&requested_path, &uploads_dir) {
         return not_found();
     }
 
     // Check if file exists
-    if !canonical_requested.is_file() {
+    if !requested_path.is_file() {
         return not_found();
     }
 
     // Read file
-    let content = match fs::read(&canonical_requested) {
+    let content = match fs::read(&requested_path) {
         Ok(c) => c,
         Err(_) => return not_found(),
     };
 
     // Determine MIME type
-    let mime_type = from_path(&canonical_requested)
+    let mime_type = from_path(&requested_path)
         .first_or_octet_stream()
         .to_string();
 
@@ -117,16 +110,18 @@ fn not_found() -> Response<Vec<u8>> {
         .unwrap()
 }
 
-/// Compare two paths for prefix containment, normalizing Windows \\?\ long-path
-/// prefixes so a canonicalized existing directory and a plain file path
-/// compare correctly.
-fn path_starts_with(path: &Path, base: &Path) -> bool {
-    // Strip Windows \\?\ long-path prefix BEFORE normalizing separators,
-    // otherwise the prefix becomes //?/ after the replace and won't match.
+/// Check that `path` is contained within `dir`, using normalized string
+/// comparison instead of canonicalize()+starts_with(). On Windows,
+/// canonicalize() prepends a \\?\ long-path prefix to existing directories
+/// but not to non-existent file paths, which breaks the prefix comparison.
+/// The path is already validated by extract_path_from_uri to start with
+/// "uploads/" and not contain ".." components.
+fn path_within_dir(path: &Path, dir: &Path) -> bool {
     let p = path.to_string_lossy();
+    let d = dir.to_string_lossy();
+    // Strip Windows \\?\ long-path prefix before normalizing separators,
+    // otherwise the prefix becomes //?/ after the replace and won't match.
     let p = p.strip_prefix(r"\\?\").unwrap_or(&p);
-    let b = base.to_string_lossy();
-    let b = b.strip_prefix(r"\\?\").unwrap_or(&b);
-    // Normalize backslashes to forward slashes for consistent comparison
-    p.replace('\\', "/").starts_with(&b.replace('\\', "/"))
+    let d = d.strip_prefix(r"\\?\").unwrap_or(&d);
+    p.replace('\\', "/").starts_with(&d.replace('\\', "/"))
 }
