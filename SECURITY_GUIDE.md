@@ -85,7 +85,7 @@ grep -c 'EXAMPLE\|SECRET\|random' .env || echo "No placeholders found ✓"
 
 ### DO ✅
 - Store secrets in `.env` file (never committed to Git)
-- Use Docker secrets for production
+- Use environment variables for production secrets
 - Rotate secrets every 90 days
 - Generate new secrets before deployment rotation
 

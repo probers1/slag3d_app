@@ -76,7 +76,7 @@ slag3D/
 - Use `server/paths.ts`: `UPLOADS_DIR`, `THUMBNAILS_DIR`, `MODELS_DIR`,
   `TMP_UPLOADS_DIR`, `resolveUploadsPath()`, `ensureUploadsDirs()`.
 - `UPLOADS_DIR` env var overrides the default (`<project root>/uploads`);
-  Docker uses `/uploads`, the LXC installer `/opt/slag3D/uploads`.
+  the LXC installer uses `/opt/slag3D/uploads`.
 - `npm run test:prod-paths` boots the bundled production server and verifies
   that uploads and thumbnails are written to and served from the same place.
 
