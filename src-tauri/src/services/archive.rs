@@ -140,7 +140,7 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
             continue;
         }
 
-        // Only extract allowed extensions (.stl, .3mf, .obj)
+        // Only extract allowed extensions (.stl, .3mf, .obj, .pdf)
         if !is_allowed_extension(&file_name) {
             continue;
         }
@@ -214,7 +214,7 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
                 return Ok(false);
             }
 
-            // Only extract allowed extensions (.stl, .3mf, .obj)
+            // Only extract allowed extensions (.stl, .3mf, .obj, .pdf)
             if !is_allowed_extension(&file_name) {
                 return Ok(false);
             }

@@ -23,6 +23,7 @@ import {
   Scale,
   Check,
   FileCode,
+  FileText,
   Edit2,
   Trash2,
   Eye,
@@ -33,6 +34,9 @@ import { ModelFile, CollectionItem } from '../types';
 import { Dropdown } from './Dropdown';
 import { invoke } from '@tauri-apps/api/core';
 import { apiFetch, apiSaveThumbnail, fetchFileAsBlobUrl, apiAddModelFiles } from '../utils/api';
+
+const is3DFile = (file: ModelFile) =>
+  ['stl', '3mf', 'obj'].includes(file.original_name.split('.').pop()?.toLowerCase() || '');
 
 interface ModelDetail {
   id: string;
@@ -144,7 +148,8 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
           if (prev && data.model.files.some((f: ModelFile) => f.id === prev)) {
             return prev;
           }
-          const primary = data.model.files.find((f: ModelFile) => f.is_primary_3d === 1) || data.model.files[0];
+          const primary = data.model.files.find((f: ModelFile) => f.is_primary_3d === 1 && is3DFile(f))
+            || data.model.files.find((f: ModelFile) => is3DFile(f));
           return primary ? primary.id : null;
         });
       }
@@ -433,8 +438,9 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   // When model or selectedFileId changes, load that file into the Three.js scene
   useEffect(() => {
     if (!model || !model.files || model.files.length === 0) return;
-    const activeFile = model.files.find((f) => f.id === selectedFileId) || model.files[0];
-    if (activeFile) {
+    const activeFile = model.files.find((f) => f.id === selectedFileId)
+      || model.files.find((f) => f.is_primary_3d === 1);
+    if (activeFile && is3DFile(activeFile)) {
       loadActiveMesh(activeFile);
     }
   }, [model, selectedFileId, loadActiveMesh]);
@@ -691,7 +697,10 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   // owned locally. The web server still enforces ownership on every mutation.
   const isOwnerOrAdmin =
     model && (currentUserId === undefined || model.user_id === currentUserId || isAdmin);
-  const currentActiveFile = model?.files.find((f) => f.id === selectedFileId) || model?.files[0];
+  const viewableFiles = model?.files.filter(is3DFile) || [];
+  const currentActiveFile = model?.files.find((f) => f.id === selectedFileId && is3DFile(f))
+    || viewableFiles.find((f) => f.is_primary_3d === 1)
+    || viewableFiles[0];
 
   return (
     <ErrorBoundary>
@@ -755,8 +764,8 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
             <div className="lg:col-span-7 bg-[#121214] flex flex-col relative border-b lg:border-b-0 lg:border-r border-[#252530] min-h-[400px] lg:min-h-[560px]">
               <div ref={mountRef} className="w-full h-full flex-1 cursor-grab active:cursor-grabbing" />
 
-              {/* Active File Switcher Overlay */}
-              {model && model.files.length > 1 && (
+              {/* Active File Switcher Overlay (3D files only) */}
+              {viewableFiles.length > 1 && (
                 <div className="absolute top-4 left-4 z-20 flex items-center gap-2 px-3 py-1.5 bg-[#181822]/90 backdrop-blur-md border border-[#2e2e40] rounded-xl text-xs shadow-xl">
                   <span className="text-[11px] font-semibold text-neutral-400 flex items-center gap-1.5 shrink-0">
                     <Box className="w-3.5 h-3.5 text-blue-400" />
@@ -765,14 +774,14 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                   <Dropdown
                     value={currentActiveFile?.id || ''}
                     onChange={setSelectedFileId}
-                    options={model.files.map((file, idx) => ({
+                    options={viewableFiles.map((file, idx) => ({
                       value: file.id,
                       label: `${idx + 1}. ${file.original_name}${file.is_primary_3d === 1 ? ' ★ [Primary]' : ''}`,
                     }))}
                     className="bg-[#121216] border border-[#35354a] rounded-lg px-2.5 py-1 text-white text-xs outline-none focus:border-blue-500 font-medium max-w-[210px]"
                   />
                   <span className="text-[10px] text-neutral-500 font-mono shrink-0">
-                    {(model.files.findIndex((f) => f.id === currentActiveFile?.id) + 1)}/{model.files.length}
+                    {viewableFiles.findIndex((f) => f.id === currentActiveFile?.id) + 1}/{viewableFiles.length}
                   </span>
                 </div>
               )}
@@ -910,27 +919,33 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                     <FileCode className="w-4 h-4 text-blue-400" />
                     Model Files ({model?.files.length || 0})
                   </h3>
-                  <span className="text-[11px] text-neutral-400">Click any file to view in 3D</span>
+                  <span className="text-[11px] text-neutral-400">Click a 3D file to view · PDFs are downloadable attachments</span>
                 </div>
 
                 <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
                   {model?.files.map((file) => {
-                    const isCurrent = file.id === currentActiveFile?.id;
+                    const isPdf = !is3DFile(file);
+                    const isCurrent = !isPdf && file.id === currentActiveFile?.id;
                     return (
                       <div
                         key={file.id}
                         onClick={() => {
-                          setSelectedFileId(file.id);
-                          clearFileConfirm();
+                          if (!isPdf) {
+                            setSelectedFileId(file.id);
+                            clearFileConfirm();
+                          }
                         }}
-                        className={`flex items-center justify-between p-2.5 rounded-lg text-xs cursor-pointer transition-all border ${
-                          isCurrent
-                            ? 'bg-blue-950/30 border-blue-500/60 shadow-sm shadow-blue-950/30'
-                            : 'bg-[#141418] hover:bg-[#1a1a22] border-[#2a2a35] hover:border-[#38384a]'
+                        className={`flex items-center justify-between p-2.5 rounded-lg text-xs transition-all border ${
+                          isPdf
+                            ? 'bg-[#141418] border-[#2a2a35]'
+                            : isCurrent
+                              ? 'bg-blue-950/30 border-blue-500/60 shadow-sm shadow-blue-950/30 cursor-pointer'
+                              : 'bg-[#141418] hover:bg-[#1a1a22] border-[#2a2a35] hover:border-[#38384a] cursor-pointer'
                         }`}
                       >
                         <div className="truncate mr-2">
                           <div className="flex items-center gap-1.5 truncate">
+                            {isPdf && <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
                             <span
                               className={`font-semibold truncate ${
                                 isCurrent ? 'text-blue-300' : 'text-neutral-200'
@@ -938,6 +953,13 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                             >
                               {file.original_name}
                             </span>
+
+                            {isPdf && (
+                              <span className="flex items-center gap-1 px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[9px] font-mono shrink-0">
+                                <FileText className="w-2.5 h-2.5" />
+                                ATTACHMENT
+                              </span>
+                            )}
 
                             {file.is_primary_3d === 1 && (
                               <span className="flex items-center gap-1 px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-[9px] font-mono shrink-0">
@@ -959,7 +981,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          {!isCurrent && (
+                          {!isPdf && !isCurrent && (
                             <button
                               onClick={() => setSelectedFileId(file.id)}
                               className="flex items-center gap-1 px-2 py-1 text-[10px] text-blue-400 hover:text-white bg-blue-950/50 hover:bg-blue-600 border border-blue-800/50 rounded transition-colors"
@@ -970,7 +992,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                             </button>
                           )}
 
-                          {isOwnerOrAdmin && file.is_primary_3d !== 1 && (
+                          {!isPdf && isOwnerOrAdmin && file.is_primary_3d !== 1 && (
                             <button
                               onClick={() => handleSetPrimaryFile(file.id)}
                               className="px-2 py-1 text-[10px] text-neutral-400 hover:text-white bg-[#22222c] hover:bg-[#2c2c38] rounded transition-colors"

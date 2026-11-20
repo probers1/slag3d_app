@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Upload, FileCode, CheckCircle, AlertCircle } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { CollectionItem } from '../types';
-import { apiImportModels, pickFiles } from '../utils/api';
+import { apiImportModels, pickFiles, MODEL_FILE_FILTERS } from '../utils/api';
 import { Dropdown } from './Dropdown';
 
 interface UploadModalProps {
@@ -31,11 +31,12 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [uploadError, setUploadError] = useState<UploadErrorDetail | null>(null);
 
   const handlePickFiles = async () => {
-    const paths = await pickFiles(true, ['stl', '3mf', 'obj', 'zip', '7z']);
+    const paths = await pickFiles(true, MODEL_FILE_FILTERS);
     if (!paths.length) return;
     setSelectedPaths((prev) => [...prev, ...paths]);
-    if (!title && paths[0]) {
-      const filename = paths[0].split(/[/\\]/).pop() || '';
+    const titleSource = paths.find((p) => !p.toLowerCase().endsWith('.pdf')) || paths[0];
+    if (!title && titleSource) {
+      const filename = titleSource.split(/[/\\]/).pop() || '';
       const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
       setTitle(nameWithoutExt);
     }
@@ -48,7 +49,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedPaths.length === 0) {
-      setUploadError({ message: 'Please select at least one 3D file or archive', type: 'file' });
+      setUploadError({ message: 'Please select at least one 3D file or archive (PDFs can be attached)', type: 'file' });
       return;
     }
     setIsUploading(true);
@@ -71,7 +72,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           <div className="flex items-center justify-between px-6 py-4 border-b border-[#262632]">
             <div className="flex items-center gap-2">
               <Upload className="w-5 h-5 text-blue-400" />
-              <h2 className="text-base font-bold text-white">Upload 3D Asset or Archive</h2>
+              <h2 className="text-base font-bold text-white">Upload 3D Asset, PDF, or Archive</h2>
             </div>
             <button onClick={onClose} className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-white/5 transition-colors">
               <X className="w-4 h-4" />
@@ -100,7 +101,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 Click to select files, or <span className="text-blue-400 underline">browse</span>
               </p>
               <p className="text-xs text-neutral-500 mt-1">
-                Supports .STL, .3MF, .OBJ, and multi-file archives (.ZIP, .7Z) up to 300MB
+                Supports .STL, .3MF, .OBJ, .PDF attachments, and archives (.ZIP, .7Z) up to 300MB
               </p>
             </div>
 

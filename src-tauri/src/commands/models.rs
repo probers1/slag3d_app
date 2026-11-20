@@ -4,7 +4,7 @@ use crate::commands::{
 use crate::db::schema::DEFAULT_USER_ID;
 use crate::services::archive::{extract_7z, extract_zip};
 use crate::services::path_util::resolve_upload_relative_path;
-use crate::services::storage::{ExtractedFile, get_unique_filename};
+use crate::services::storage::{ExtractedFile, get_unique_filename, is_3d_file};
 use base64::{engine::general_purpose, Engine as _};
 use rusqlite::OptionalExtension;
 use std::fs;
@@ -282,8 +282,8 @@ pub async fn import_models(
         all_extracted_files.extend(extracted);
     }
 
-    if all_extracted_files.is_empty() {
-        return Err("No valid 3D files found in archives".to_string());
+    if !all_extracted_files.iter().any(|f| is_3d_file(&f.filename)) {
+        return Err("No 3D files found. PDFs can only be attached to a model with a 3D file.".to_string());
     }
 
     // Insert model
@@ -299,10 +299,11 @@ pub async fn import_models(
         ).map_err(|e| e.to_string())?;
 
         // Insert files with public paths so the asset protocol can serve them
+        let primary_3d_index = all_extracted_files.iter().position(|f| is_3d_file(&f.filename));
         for (idx, file) in all_extracted_files.iter().enumerate() {
             let file_id = Uuid::new_v4().to_string();
             let mime_type = mime_guess::from_path(&file.destination_path).first_or_octet_stream().to_string();
-            let is_primary = if idx == 0 { 1 } else { 0 };
+            let is_primary = if Some(idx) == primary_3d_index { 1 } else { 0 };
             let public_path = format!("/uploads/models/{}/{}", model_id, file.filename);
 
             conn.execute(
@@ -378,6 +379,15 @@ pub async fn update_model(
     }
 
     if let Some(pfid) = primary_file_id {
+        let filename: Option<String> = conn
+            .prepare("SELECT filename FROM files WHERE id = ? AND model_id = ?")
+            .map_err(|e| e.to_string())?
+            .query_row(rusqlite::params![&pfid, &id], |row| row.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if !filename.as_deref().is_some_and(is_3d_file) {
+            return Err("Only 3D files can be set as primary".to_string());
+        }
         conn.execute("UPDATE files SET is_primary_3d = 0 WHERE model_id = ?", rusqlite::params![&id]).map_err(|e| e.to_string())?;
         conn.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ? AND model_id = ?", rusqlite::params![&pfid, &id]).map_err(|e| e.to_string())?;
     }
@@ -462,16 +472,9 @@ pub async fn add_model_files(
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let is_3d = |name: &str| {
-        matches!(
-            Path::new(name).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str(),
-            "stl" | "3mf" | "obj"
-        )
-    };
-
     let largest_new = inserted
         .iter()
-        .filter(|f| is_3d(&f.original_name))
+        .filter(|f| is_3d_file(&f.original_name))
         .max_by_key(|f| f.file_size);
 
     if let Some(largest) = largest_new {
@@ -561,7 +564,7 @@ pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String
     // If this was the primary 3D file, select a new primary from remaining files
     if file.1 == 1 {
         let remaining = conn.query_row(
-            "SELECT id, file_size, original_name, file_path FROM files WHERE model_id = ? AND is_primary_3d = 0 ORDER BY file_size DESC LIMIT 1",
+            "SELECT id, file_size, original_name, file_path FROM files WHERE model_id = ? AND is_primary_3d = 0 AND (lower(original_name) LIKE '%.stl' OR lower(original_name) LIKE '%.3mf' OR lower(original_name) LIKE '%.obj') ORDER BY file_size DESC LIMIT 1",
             rusqlite::params![&model_id],
             |row| {
                 Ok((

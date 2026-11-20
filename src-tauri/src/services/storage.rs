@@ -8,14 +8,20 @@ pub struct ExtractedFile {
     pub size: u64,
 }
 
+pub fn is_3d_file(filename: &str) -> bool {
+    matches!(
+        Path::new(filename).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str(),
+        "stl" | "3mf" | "obj"
+    )
+}
+
 pub fn is_allowed_extension(filename: &str) -> bool {
-    let allowed = ["stl", "3mf", "obj"];
-    if let Some(ext) = Path::new(filename).extension().and_then(|e| e.to_str()) {
-        let lower = ext.to_lowercase();
-        allowed.contains(&lower.as_str())
-    } else {
-        false
-    }
+    is_3d_file(filename)
+        || Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .eq_ignore_ascii_case("pdf")
 }
 
 pub fn get_app_data_dir() -> PathBuf {

@@ -161,6 +161,8 @@ export async function apiGetTags() {
   return await mapAssetPaths(data);
 }
 
+export const MODEL_FILE_FILTERS = ['stl', '3mf', 'obj', 'zip', '7z', 'pdf'];
+
 export async function pickFiles(multiple = true, filters?: string[]) {
   const res = await openDialog({
     multiple,
@@ -183,7 +185,7 @@ export async function apiInitDb() {
  * the selected paths straight to the `add_model_files` Rust command.
  */
 export async function apiAddModelFiles(modelId: string) {
-  const files = await pickFiles(true, ['stl', '3mf', 'obj', 'zip', '7z']);
+  const files = await pickFiles(true, MODEL_FILE_FILTERS);
   if (files.length === 0) {
     return { ok: true, added: [] };
   }

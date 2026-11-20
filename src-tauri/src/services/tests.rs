@@ -1,4 +1,4 @@
-use crate::services::storage::is_allowed_extension;
+use crate::services::storage::{is_3d_file, is_allowed_extension};
 use crate::services::archive::is_safe_path;
 use std::path::PathBuf;
 
@@ -24,6 +24,14 @@ fn test_is_allowed_extension_case_insensitive() {
 /// ("models_evil/file.stl" matches a "models" prefix, and
 /// "models/../../vault.db" matches too), so containment must be checked on
 /// canonical forms after rejecting ".." components.
+#[test]
+fn test_pdf_is_allowed_but_not_a_3d_file() {
+    assert!(is_allowed_extension("manual.pdf"));
+    assert!(is_allowed_extension("MANUAL.PDF"));
+    assert!(!is_3d_file("manual.pdf"));
+    assert!(is_3d_file("part.STL"));
+}
+
 #[test]
 fn test_is_safe_path_rejects_dotdot_components() {
     let base = PathBuf::from("/tmp/slag3d/uploads/models/abc123");
