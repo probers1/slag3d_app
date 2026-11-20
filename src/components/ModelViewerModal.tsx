@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import * as THREE from 'three';
 import { ErrorBoundary } from './ErrorBoundary';
+import { PdfViewerModal } from './PdfViewerModal';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
@@ -76,6 +77,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   // Model data state
   const [model, setModel] = useState<ModelDetail | null>(null);
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [pdfPreview, setPdfPreview] = useState<ModelFile | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMesh, setLoadingMesh] = useState(false);
   const [meshError, setMeshError] = useState<string | null>(null);
@@ -930,17 +932,16 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                       <div
                         key={file.id}
                         onClick={() => {
-                          if (!isPdf) {
-                            setSelectedFileId(file.id);
-                            clearFileConfirm();
-                          }
+                          clearFileConfirm();
+                          if (isPdf) setPdfPreview(file);
+                          else setSelectedFileId(file.id);
                         }}
-                        className={`flex items-center justify-between p-2.5 rounded-lg text-xs transition-all border ${
+                        className={`flex items-center justify-between p-2.5 rounded-lg text-xs transition-all border cursor-pointer ${
                           isPdf
-                            ? 'bg-[#141418] border-[#2a2a35]'
+                            ? 'bg-[#141418] border-[#2a2a35] hover:bg-[#1a1a22] hover:border-[#38384a]'
                             : isCurrent
-                              ? 'bg-blue-950/30 border-blue-500/60 shadow-sm shadow-blue-950/30 cursor-pointer'
-                              : 'bg-[#141418] hover:bg-[#1a1a22] border-[#2a2a35] hover:border-[#38384a] cursor-pointer'
+                              ? 'bg-blue-950/30 border-blue-500/60 shadow-sm shadow-blue-950/30'
+                              : 'bg-[#141418] hover:bg-[#1a1a22] border-[#2a2a35] hover:border-[#38384a]'
                         }`}
                       >
                         <div className="truncate mr-2">
@@ -981,13 +982,16 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          {!isPdf && !isCurrent && (
+                          {(isPdf || !isCurrent) && (
                             <button
-                              onClick={() => setSelectedFileId(file.id)}
+                              onClick={() => {
+                                if (isPdf) setPdfPreview(file);
+                                else setSelectedFileId(file.id);
+                              }}
                               className="flex items-center gap-1 px-2 py-1 text-[10px] text-blue-400 hover:text-white bg-blue-950/50 hover:bg-blue-600 border border-blue-800/50 rounded transition-colors"
-                              title="Load this file into the 3D viewport"
+                              title={isPdf ? 'Open PDF in viewer' : 'Load this file into the 3D viewport'}
                             >
-                              <Eye className="w-3 h-3" />
+                              {isPdf ? <FileText className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                               <span>View</span>
                             </button>
                           )}
@@ -1208,6 +1212,14 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
           </div>
         </div>
       </div>
+
+      {pdfPreview && (
+        <PdfViewerModal
+          file={pdfPreview}
+          onClose={() => setPdfPreview(null)}
+          onDownload={handleDownloadFile}
+        />
+      )}
     </ErrorBoundary>
   );
 };
