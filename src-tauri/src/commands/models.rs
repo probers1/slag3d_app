@@ -649,6 +649,50 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
     Ok(general_purpose::STANDARD.encode(&content))
 }
 
+/// Persist a downloaded asset to a user-chosen path.
+///
+/// The native save dialog runs on the main thread and returns a path the user
+/// picked. Writing the file ourselves (rather than relying on a blob-URL anchor
+/// click) is the only reliable way to trigger a real download in a Tauri
+/// WebView — on Linux AppImage the anchor click silently does nothing, which
+/// is why the Download button appeared to be dead.
+#[tauri::command]
+pub async fn save_downloaded_file(
+    app: AppHandle,
+    source_path: String,
+    dest_path: String,
+) -> Result<(), String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let uploads_dir = app_data_dir.join("uploads");
+
+    // Resolve the source exactly like read_file does, so the security
+    // containment check applies to downloads too.
+    let relative = source_path
+        .strip_prefix("slag3d-asset://")
+        .or_else(|| source_path.strip_prefix("slag3d-asset:"))
+        .unwrap_or(&source_path);
+    let relative = relative
+        .strip_prefix("localhost/")
+        .unwrap_or(relative)
+        .trim_start_matches('/');
+    let relative = relative.strip_prefix("uploads/").unwrap_or(relative);
+
+    let file_path = uploads_dir.join(relative);
+    let canonical_uploads = fs::canonicalize(&uploads_dir).map_err(|e| e.to_string())?;
+    let canonical_file = fs::canonicalize(&file_path).map_err(|e| e.to_string())?;
+    if !path_starts_with(&canonical_file, &canonical_uploads) || !canonical_file.is_file() {
+        return Err("Access denied".to_string());
+    }
+
+    let content = fs::read(&canonical_file).map_err(|e| e.to_string())?;
+    // The parent directory of the user's chosen path may not exist yet.
+    if let Some(parent) = std::path::Path::new(&dest_path).parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&dest_path, &content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Compare two paths for prefix containment, normalizing Windows \\?\ long-path
 /// prefixes so a canonicalized existing directory and a plain file path
 /// compare correctly.

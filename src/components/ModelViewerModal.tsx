@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { ModelFile, CollectionItem } from '../types';
 import { Dropdown } from './Dropdown';
+import { invoke } from '@tauri-apps/api/core';
 import { apiFetch, apiSaveThumbnail, fetchFileAsBlobUrl, apiAddModelFiles } from '../utils/api';
 
 interface ModelDetail {
@@ -622,6 +623,40 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       }
     } catch (err: any) {
       alert(err.message || 'Error deleting file');
+    }
+  };
+
+  // Download a file to disk.
+  //
+  // A blob-URL anchor click does NOT trigger a download inside a Tauri WebView
+  // (on Linux AppImage it silently does nothing — the button looked dead).
+  // Instead, open the native save dialog and stream the file bytes to the path
+  // the user picks, via the `save_downloaded_file` Rust command.
+  const handleDownloadFile = async (file: ModelFile) => {
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const filePath = await save({
+        defaultPath: file.original_name,
+        filters: [
+          { name: file.original_name.split('.').pop()?.toUpperCase() || 'File', extensions: [file.original_name.split('.').pop() || '*'] },
+        ],
+      });
+      if (!filePath) return; // user cancelled the dialog
+
+      // `save()` returns a FilePath enum (Path | Url), not a plain string.
+      const destPath = typeof filePath === 'string'
+        ? filePath
+        : (filePath as any).Path ?? (filePath as any).Url ?? String(filePath);
+
+      await invoke('save_downloaded_file', {
+        sourcePath: file.file_path,
+        destPath,
+      });
+    } catch (err: any) {
+      // Tauri invoke rejections are often raw strings, not Error objects,
+      // so `err.message` is undefined and the fallback would hide the real cause.
+      const detail = (typeof err === 'string' ? err : (err?.message || err?.toString?.() || String(err)));
+      alert(`Error downloading file: ${detail}`);
     }
   };
 
