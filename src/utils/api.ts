@@ -193,14 +193,37 @@ export async function apiAddModelFiles(modelId: string) {
 
 // Read an uploaded asset file via Tauri and return a blob URL.
 // Caller must revoke the URL when done (use try/finally).
-// read_file returns a base64-encoded string; we decode it to bytes before creating the blob.
+//
+// `read_file` returns a `tauri::ipc::Response` with the raw file bytes. How
+// those bytes reach JavaScript depends on which IPC transport Tauri uses:
+//
+//  - custom `ipc:` protocol  -> ArrayBuffer (fast path)
+//  - postMessage fallback    -> JSON array of byte numbers, because Rust
+//                               serializes `Vec<u8>` as a JSON array when the
+//                               custom protocol is blocked by CSP
+//  - older backend builds    -> base64 string
+//
+// All three must be handled or the 3D viewer silently renders an empty scene.
 export async function fetchFileAsBlobUrl(path: string): Promise<string> {
-  const base64 = await invoke<string>('read_file', { path });
-  const binaryString = atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+  const data: unknown = await invoke('read_file', { path });
+
+  let bytes: Uint8Array;
+  if (typeof data === 'string') {
+    const binaryString = atob(data);
+    bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+  } else if (data instanceof ArrayBuffer) {
+    bytes = new Uint8Array(data);
+  } else if (ArrayBuffer.isView(data)) {
+    bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  } else if (Array.isArray(data)) {
+    bytes = Uint8Array.from(data as number[]);
+  } else {
+    throw new Error(`Unexpected read_file response type: ${typeof data}`);
   }
+
   return URL.createObjectURL(new Blob([bytes]));
 }
 

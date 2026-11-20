@@ -74,6 +74,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMesh, setLoadingMesh] = useState(false);
+  const [meshError, setMeshError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
@@ -265,6 +266,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
     const controls = controlsRef.current;
 
     setLoadingMesh(true);
+    setMeshError(null);
 
     // Clean up existing mesh
     if (activeMeshRef.current) {
@@ -360,6 +362,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
           undefined,
           (err) => {
             console.error('STL loading error:', err);
+            setMeshError(`Could not parse STL: ${String(err)}`);
             if (blobUrl) URL.revokeObjectURL(blobUrl);
             blobUrl = null;
             setLoadingMesh(false);
@@ -382,6 +385,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
           undefined,
           (err) => {
             console.error('OBJ loading error:', err);
+            setMeshError(`Could not parse OBJ: ${String(err)}`);
             if (blobUrl) URL.revokeObjectURL(blobUrl);
             blobUrl = null;
             setLoadingMesh(false);
@@ -404,6 +408,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
           undefined,
           (err) => {
             console.error('3MF loading error:', err);
+            setMeshError(`Could not parse 3MF: ${String(err)}`);
             if (blobUrl) URL.revokeObjectURL(blobUrl);
             blobUrl = null;
             setLoadingMesh(false);
@@ -418,6 +423,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       }
     } catch (err) {
       console.error('Failed to load 3D file:', err);
+      setMeshError(`Could not read 3D file: ${err instanceof Error ? err.message : String(err)}`);
       if (blobUrl) URL.revokeObjectURL(blobUrl);
       blobUrl = null;
       setLoadingMesh(false);
@@ -775,6 +781,13 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                 <div className="absolute top-4 right-4 z-20 px-3 py-1.5 bg-[#181822]/90 backdrop-blur-md border border-[#2e2e40] rounded-xl text-xs text-blue-400 flex items-center gap-2 shadow-lg">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   <span>Loading 3D asset...</span>
+                </div>
+              )}
+
+              {meshError && (
+                <div className="absolute top-4 right-4 z-30 max-w-[min(28rem,calc(100%-2rem))] px-3 py-2.5 bg-red-950/90 backdrop-blur-md border border-red-500/40 rounded-xl text-xs text-red-200 shadow-lg">
+                  <div className="font-semibold text-red-100 mb-1">3D preview unavailable</div>
+                  <div className="font-mono text-[11px] leading-relaxed break-words whitespace-pre-wrap">{meshError}</div>
                 </div>
               )}
 

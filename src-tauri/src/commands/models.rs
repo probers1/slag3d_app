@@ -3,6 +3,7 @@ use crate::commands::{
 };
 use crate::db::schema::DEFAULT_USER_ID;
 use crate::services::archive::{extract_7z, extract_zip};
+use crate::services::path_util::resolve_upload_relative_path;
 use crate::services::storage::{ExtractedFile, get_unique_filename};
 use base64::{engine::general_purpose, Engine as _};
 use rusqlite::OptionalExtension;
@@ -617,30 +618,11 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<tauri::ipc::Respo
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let uploads_dir = app_data_dir.join("uploads");
 
-    // Accept either the mapped `slag3d-asset://uploads/...` form or a raw
-    // `/uploads/...` / `uploads/...` public path.
-    let relative = path
-        .strip_prefix("http://slag3d-asset.localhost/")
-        .or_else(|| path.strip_prefix("https://slag3d-asset.localhost/"))
-        .or_else(|| path.strip_prefix("slag3d-asset://"))
-        .or_else(|| path.strip_prefix("slag3d-asset:"))
-        .unwrap_or(&path);
-    let relative = relative
-        .strip_prefix("localhost/")
-        .unwrap_or(relative)
-        .trim_start_matches('/');
-    // Drop the leading `uploads/` so we join directly under uploads_dir.
-    let relative = relative.strip_prefix("uploads/").unwrap_or(relative);
-    let decoded_relative = urlencoding::decode(relative).map_err(|e| e.to_string())?;
+    // Resolve the path using the shared path_util. Handles all scheme variants,
+    // URL decoding, canonicalization, and containment checking.
+    let canonical_file = resolve_upload_relative_path(&path, &uploads_dir)?;
 
-    let file_path = uploads_dir.join(decoded_relative.as_ref());
-
-    // Security: the resolved path must stay inside the uploads tree.
-    // On Windows, canonicalize() may prepend a \\?\ long-path prefix, so
-    // compare using the normalized string form instead of raw Path::starts_with.
-    let canonical_uploads = fs::canonicalize(&uploads_dir).map_err(|e| e.to_string())?;
-    let canonical_file = fs::canonicalize(&file_path).map_err(|e| e.to_string())?;
-    if !path_starts_with(&canonical_file, &canonical_uploads) || !canonical_file.is_file() {
+    if !canonical_file.is_file() {
         return Err("Access denied".to_string());
     }
 
@@ -664,25 +646,11 @@ pub async fn save_downloaded_file(
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let uploads_dir = app_data_dir.join("uploads");
 
-    // Resolve the source exactly like read_file does, so the security
-    // containment check applies to downloads too.
-    let relative = source_path
-        .strip_prefix("http://slag3d-asset.localhost/")
-        .or_else(|| source_path.strip_prefix("https://slag3d-asset.localhost/"))
-        .or_else(|| source_path.strip_prefix("slag3d-asset://"))
-        .or_else(|| source_path.strip_prefix("slag3d-asset:"))
-        .unwrap_or(&source_path);
-    let relative = relative
-        .strip_prefix("localhost/")
-        .unwrap_or(relative)
-        .trim_start_matches('/');
-    let relative = relative.strip_prefix("uploads/").unwrap_or(relative);
-    let decoded_relative = urlencoding::decode(relative).map_err(|e| e.to_string())?;
+    // Resolve the source using the shared path_util. Handles all scheme variants,
+    // URL decoding, canonicalization, and containment checking.
+    let canonical_file = resolve_upload_relative_path(&source_path, &uploads_dir)?;
 
-    let file_path = uploads_dir.join(decoded_relative.as_ref());
-    let canonical_uploads = fs::canonicalize(&uploads_dir).map_err(|e| e.to_string())?;
-    let canonical_file = fs::canonicalize(&file_path).map_err(|e| e.to_string())?;
-    if !path_starts_with(&canonical_file, &canonical_uploads) || !canonical_file.is_file() {
+    if !canonical_file.is_file() {
         return Err("Access denied".to_string());
     }
 
@@ -692,20 +660,6 @@ pub async fn save_downloaded_file(
     }
     fs::copy(&canonical_file, &dest_path).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-/// Compare two paths for prefix containment, normalizing Windows \\?\ long-path
-/// prefixes so a canonicalized existing directory and a plain file path
-/// compare correctly.
-fn path_starts_with(path: &Path, base: &Path) -> bool {
-    // Strip Windows \\?\ long-path prefix BEFORE normalizing separators,
-    // otherwise the prefix becomes //?/ after the replace and won't match.
-    let p = path.to_string_lossy();
-    let p = p.strip_prefix(r"\\?\").unwrap_or(&p);
-    let b = base.to_string_lossy();
-    let b = b.strip_prefix(r"\\?\").unwrap_or(&b);
-    // Normalize backslashes to forward slashes for consistent comparison
-    p.replace('\\', "/").starts_with(&b.replace('\\', "/"))
 }
 
 #[tauri::command]

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Search, RefreshCw, X, Folder, Upload, ChevronLeft, ChevronRight, Layers, Tag } from 'lucide-react';
 import { ModelItem, CollectionItem, TagItem } from './types';
 import { Navbar } from './components/Navbar';
@@ -7,8 +7,7 @@ import { CollectionsDrawer } from './components/CollectionsDrawer';
 import { UploadModal } from './components/UploadModal';
 import { Dropdown } from './components/Dropdown';
 import { apiFetch, apiInitDb } from './utils/api';
-
-const ModelViewerModal = React.lazy(() => import('./components/ModelViewerModal'));
+import { ModelViewerModal } from './components/ModelViewerModal';
 
 export default function App() {
   // Filter and pagination state
@@ -446,8 +445,7 @@ export default function App() {
 
       {/* 3D Model Viewer Modal */}
       {selectedModelId && (
-        <React.Suspense fallback={null}>
-          <ModelViewerModal
+        <ModelViewerModal
             modelId={selectedModelId}
             collections={collections}
             onClose={() => setSelectedModelId(null)}
@@ -470,7 +468,6 @@ export default function App() {
               fetchCollections();
             }}
           />
-        </React.Suspense>
       )}
     </div>
   );

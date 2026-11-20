@@ -46,32 +46,64 @@ impl std::fmt::Display for ArchiveError {
 impl std::error::Error for ArchiveError {}
 
 pub fn is_safe_path(base: &Path, path: &Path) -> bool {
-    // Try canonicalized comparison first (works when both paths exist).
-    if let (Ok(normalized), Ok(base_canonical)) = (
-        path.canonicalize(),
-        base.canonicalize(),
-    ) {
-        return normalized.starts_with(&base_canonical);
-    }
-
-    // Fallback: normalize path separators and do a string prefix check.
-    // On Windows, canonicalize() may prepend a \\?\ long-path prefix to
-    // existing directories while the non-existent file path keeps its
-    // plain form, so a starts_with() on the raw canonicalized values
-    // would fail even for perfectly safe paths.
-    let base_norm = base.to_string_lossy().replace('\\', "/");
-    let path_norm = path.to_string_lossy().replace('\\', "/");
-    if path_norm.starts_with(&base_norm) {
-        return true;
-    }
-
-    // Reject any path that climbs above the base via .. components.
+    // Reject any path that climbs above the base via .. components. Do this
+    // FIRST, before any string-prefix check: a raw starts_with() on
+    // uncanonicalized paths is trivially bypassed ("models_evil/file.stl"
+    // matches a "models" prefix, and "models/../../vault.db" matches too).
     for component in path.components() {
         if component == std::path::Component::ParentDir {
             return false;
         }
     }
-    true
+
+    // Canonicalize the base (it always exists — the model dir is created
+    // before extraction). For the target path, canonicalize what we can:
+    // if the file already exists, canonicalize it directly; otherwise
+    // canonicalize the nearest existing ancestor and re-join the remainder.
+    let base_canonical = match base.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    let path_canonical = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            // Path doesn't exist yet (we're about to create it). Walk up to
+            // the nearest existing ancestor, canonicalize that, then append
+            // the remaining components.
+            let mut ancestor = path.to_path_buf();
+            let mut tail = Vec::new();
+            while !ancestor.exists() {
+                match ancestor.file_name() {
+                    Some(name) => {
+                        tail.push(name.to_os_string());
+                        ancestor.pop();
+                    }
+                    None => return false,
+                }
+            }
+            let mut canonical = ancestor.canonicalize().unwrap_or_else(|_| base_canonical.clone());
+            for component in tail.iter().rev() {
+                canonical.push(component);
+            }
+            canonical
+        }
+    };
+
+    // Containment check on canonical forms (handles Windows \\?\ prefixes and
+    // mixed separators via the helper below).
+    path_starts_with(&path_canonical, &base_canonical)
+}
+
+/// Compare two paths for prefix containment, normalizing Windows \\?\ long-path
+/// prefixes so a canonicalized existing directory and a plain file path
+/// compare correctly.
+fn path_starts_with(path: &Path, base: &Path) -> bool {
+    let p = path.to_string_lossy();
+    let p = p.strip_prefix(r"\\?\").unwrap_or(&p);
+    let b = base.to_string_lossy();
+    let b = b.strip_prefix(r"\\?\").unwrap_or(&b);
+    p.replace('\\', "/").starts_with(&b.replace('\\', "/"))
 }
 
 pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFile>, ArchiveError> {
@@ -95,6 +127,16 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
 
         // Skip directories
         if file_entry.is_dir() || file_name.ends_with('/') || file_name.ends_with('\\') {
+            continue;
+        }
+
+        // Reject path traversal outright. Entry names are attacker-controlled;
+        // checking this before file_name() extraction prevents an entry like
+        // "evil/../payload.stl" from passing is_allowed_extension on its
+        // final component and then being flattened into the model dir.
+        // Check component-by-component (not substring) so a legitimate file
+        // like "foo..bar.stl" isn't rejected.
+        if file_name.split('/').any(|c| c == "..") || file_name.split('\\').any(|c| c == "..") {
             continue;
         }
 
@@ -160,6 +202,16 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
             // Skip directories (some archives mark dirs explicitly, others end with /)
             if entry.is_directory() || file_name.ends_with('/') || file_name.ends_with('\\') {
                 return Ok(true);
+            }
+
+            // Reject path traversal outright. Entry names are attacker-controlled;
+            // checking this before file_name() extraction prevents an entry like
+            // "evil/../payload.stl" from passing is_allowed_extension on its
+            // final component and then being flattened into the model dir.
+            // Check component-by-component (not substring) so a legitimate file
+            // like "foo..bar.stl" isn't rejected.
+            if file_name.split('/').any(|c| c == "..") || file_name.split('\\').any(|c| c == "..") {
+                return Ok(false);
             }
 
             // Only extract allowed extensions (.stl, .3mf, .obj)
