@@ -624,7 +624,9 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
     // Accept either the mapped `slag3d-asset://uploads/...` form or a raw
     // `/uploads/...` / `uploads/...` public path.
     let relative = path
-        .strip_prefix("slag3d-asset://")
+        .strip_prefix("http://slag3d-asset.localhost/")
+        .or_else(|| path.strip_prefix("https://slag3d-asset.localhost/"))
+        .or_else(|| path.strip_prefix("slag3d-asset://"))
         .or_else(|| path.strip_prefix("slag3d-asset:"))
         .unwrap_or(&path);
     let relative = relative
@@ -633,8 +635,9 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
         .trim_start_matches('/');
     // Drop the leading `uploads/` so we join directly under uploads_dir.
     let relative = relative.strip_prefix("uploads/").unwrap_or(relative);
+    let decoded_relative = urlencoding::decode(relative).map_err(|e| e.to_string())?;
 
-    let file_path = uploads_dir.join(relative);
+    let file_path = uploads_dir.join(decoded_relative.as_ref());
 
     // Security: the resolved path must stay inside the uploads tree.
     // On Windows, canonicalize() may prepend a \\?\ long-path prefix, so
@@ -668,7 +671,9 @@ pub async fn save_downloaded_file(
     // Resolve the source exactly like read_file does, so the security
     // containment check applies to downloads too.
     let relative = source_path
-        .strip_prefix("slag3d-asset://")
+        .strip_prefix("http://slag3d-asset.localhost/")
+        .or_else(|| source_path.strip_prefix("https://slag3d-asset.localhost/"))
+        .or_else(|| source_path.strip_prefix("slag3d-asset://"))
         .or_else(|| source_path.strip_prefix("slag3d-asset:"))
         .unwrap_or(&source_path);
     let relative = relative
@@ -676,20 +681,20 @@ pub async fn save_downloaded_file(
         .unwrap_or(relative)
         .trim_start_matches('/');
     let relative = relative.strip_prefix("uploads/").unwrap_or(relative);
+    let decoded_relative = urlencoding::decode(relative).map_err(|e| e.to_string())?;
 
-    let file_path = uploads_dir.join(relative);
+    let file_path = uploads_dir.join(decoded_relative.as_ref());
     let canonical_uploads = fs::canonicalize(&uploads_dir).map_err(|e| e.to_string())?;
     let canonical_file = fs::canonicalize(&file_path).map_err(|e| e.to_string())?;
     if !path_starts_with(&canonical_file, &canonical_uploads) || !canonical_file.is_file() {
         return Err("Access denied".to_string());
     }
 
-    let content = fs::read(&canonical_file).map_err(|e| e.to_string())?;
     // The parent directory of the user's chosen path may not exist yet.
     if let Some(parent) = std::path::Path::new(&dest_path).parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(&dest_path, &content).map_err(|e| e.to_string())?;
+    fs::copy(&canonical_file, &dest_path).map_err(|e| e.to_string())?;
     Ok(())
 }
 

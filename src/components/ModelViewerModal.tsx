@@ -652,6 +652,8 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
         sourcePath: file.file_path,
         destPath,
       });
+      setSaveToast(`Saved ${file.original_name}`);
+      setTimeout(() => setSaveToast(null), 2500);
     } catch (err: any) {
       // Tauri invoke rejections are often raw strings, not Error objects,
       // so `err.message` is undefined and the fallback would hide the real cause.
@@ -946,14 +948,14 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                             </button>
                           )}
 
-                          <a
-                            href={file.file_path}
-                            download={file.original_name}
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadFile(file)}
                             className="p-1.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded transition-colors"
                             title="Download file"
                           >
                             <Download className="w-3.5 h-3.5" />
-                          </a>
+                          </button>
 
                           {isOwnerOrAdmin && (
                             <button
