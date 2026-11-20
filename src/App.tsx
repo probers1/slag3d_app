@@ -11,7 +11,7 @@ import { ModelViewerModal } from './components/ModelViewerModal';
 
 export default function App() {
   // Filter and pagination state
-  const [activeTab, setActiveTab] = useState<'all' | 'mine' | 'favorites' | 'collections'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'favorites' | 'collections'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
@@ -94,8 +94,8 @@ export default function App() {
     fetchModels();
   }, [fetchModels]);
 
-  // Tab change handler (all, mine, favorites, collections)
-  const handleTabChange = (tab: 'all' | 'mine' | 'favorites' | 'collections') => {
+  // Tab change handler (all, favorites, collections)
+  const handleTabChange = (tab: 'all' | 'favorites' | 'collections') => {
     setActiveTab(tab);
     setCurrentPage(1);
     if (tab !== 'collections') {

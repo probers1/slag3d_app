@@ -2,8 +2,8 @@ import React from 'react';
 import { Upload } from 'lucide-react';
 
 interface NavbarProps {
-  activeTab: 'all' | 'mine' | 'favorites' | 'collections';
-  onTabChange: (tab: 'all' | 'mine' | 'favorites' | 'collections') => void;
+  activeTab: 'all' | 'favorites' | 'collections';
+  onTabChange: (tab: 'all' | 'favorites' | 'collections') => void;
   onOpenUpload: () => void;
 }
 
@@ -44,16 +44,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             All Models
-          </button>
-          <button
-            onClick={() => onTabChange('mine')}
-            className={`px-3.5 py-1.5 rounded-lg transition-all whitespace-nowrap shrink-0 ${
-              activeTab === 'mine'
-                ? 'bg-blue-600 text-white shadow-sm font-semibold'
-                : 'text-neutral-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            My Models
           </button>
           <button
             onClick={() => onTabChange('favorites')}
