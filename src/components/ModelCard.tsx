@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Heart, RefreshCw, Layers, Box } from 'lucide-react';
 import { ModelItem } from '../types';
-import { renderThumbnailInBrowser } from '../utils/clientThumbnailRenderer';
+import { enqueueRender, cancelRender } from '../utils/renderQueue';
 
 interface ModelCardProps {
   model: ModelItem;
@@ -22,15 +22,27 @@ export const ModelCard: React.FC<ModelCardProps> = ({
     ? model.primary_file.original_name.split('.').pop()?.toUpperCase()
     : '3D';
 
-  // Automatically attempt client-side WebGL capture fallback if thumbnail is pending or failed
+  // Automatically attempt client-side WebGL capture fallback if thumbnail is
+  // pending or failed. Renders are serialized through the render queue so a
+  // wall of cards doesn't stall the UI with 20+ concurrent Three.js parses.
   useEffect(() => {
     if (model.thumbnail_status !== 'completed' && model.primary_file?.file_path) {
-      renderThumbnailInBrowser(model.id, model.primary_file.file_path, (newThumb) => {
-        if (onThumbnailUpdated) {
-          onThumbnailUpdated(model.id, newThumb);
-        }
+      enqueueRender({
+        modelId: model.id,
+        filePath: model.primary_file.file_path,
+        onComplete: (newThumb) => {
+          if (onThumbnailUpdated) {
+            onThumbnailUpdated(model.id, newThumb);
+          }
+        },
+        onError: () => {
+          // Leave the card in its failed state; the user can hit Retry.
+        },
       });
     }
+    return () => {
+      cancelRender(model.id);
+    };
   }, [model.id, model.thumbnail_status, model.primary_file?.file_path]);
 
   return (

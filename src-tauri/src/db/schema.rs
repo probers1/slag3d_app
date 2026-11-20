@@ -22,8 +22,6 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             username TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user','admin')),
-            is_deleted INTEGER NOT NULL DEFAULT 0,
-            deleted_at TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );",
@@ -40,8 +38,6 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             thumbnail_status TEXT NOT NULL CHECK(thumbnail_status IN ('pending','processing','completed','failed')) DEFAULT 'pending',
             width INTEGER NOT NULL DEFAULT 800,
             height INTEGER NOT NULL DEFAULT 600,
-            is_deleted INTEGER NOT NULL DEFAULT 0,
-            deleted_at TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );",
@@ -134,27 +130,34 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [&DEFAULT_USER_ID, "", "", "user"],
     )?;
 
-    // Migration v5b: the server's v4 migration only added `is_deleted` to the
-    // `users` table; the Tauri app filters `models.is_deleted = 0` in every
-    // query, so a v4 database migrated to Tauri would crash on first load.
-    // Add the column (and `deleted_at`) idempotently so an existing v4 vault
-    // upgrades in place without losing data.
-    add_soft_delete_columns(conn, "models")?;
-    add_soft_delete_columns(conn, "files")?;
-    add_soft_delete_columns(conn, "collections")?;
+    // Migration v6: the v5 schema carried `is_deleted`/`deleted_at` columns
+    // from the server's v4 migration, but the Tauri app hard-deletes models
+    // (see `delete_model` in commands/models.rs) — there is no soft-delete
+    // path, so those columns are dead weight that every query filters
+    // `is_deleted = 0` unconditionally. Drop them on existing vaults so the
+    // schema matches the fresh-table definition above and there's no stale
+    // column to confuse future migrations.
+    //
+    // SQLite 3.35+ supports ALTER TABLE ... DROP COLUMN. rusqlite 0.31 ships
+    // with SQLite 3.31+ (bundled), so DROP COLUMN is available on every
+    // supported platform.
+    drop_soft_delete_columns(conn, "models")?;
+    drop_soft_delete_columns(conn, "files")?;
+    drop_soft_delete_columns(conn, "collections")?;
+    drop_soft_delete_columns(conn, "users")?;
 
-    // Set schema version to 5 (upsert)
+    // Set schema version to 6 (upsert)
     conn.execute_batch(
-        "INSERT INTO schema_versions (id, version) VALUES (1, 5)
-         ON CONFLICT(id) DO UPDATE SET version = 5;",
+        "INSERT INTO schema_versions (id, version) VALUES (1, 6)
+         ON CONFLICT(id) DO UPDATE SET version = 6;",
     )?;
 
     Ok(())
 }
 
-/// Add `is_deleted` / `deleted_at` columns to `table` if they are missing.
-/// Safe to call on tables that already have the columns (no-op).
-fn add_soft_delete_columns(conn: &Connection, table: &str) -> Result<()> {
+/// Drop `is_deleted` / `deleted_at` columns from `table` if they exist.
+/// Safe to call on tables that don't have the columns (no-op).
+fn drop_soft_delete_columns(conn: &Connection, table: &str) -> Result<()> {
     // PRAGMA table_info returns columns: cid, name, type, notnull, dflt_value, pk
     // The column name is at index 1 (name), not 0 (cid).
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
@@ -162,17 +165,13 @@ fn add_soft_delete_columns(conn: &Connection, table: &str) -> Result<()> {
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<Result<Vec<_>, _>>()?;
 
-    if !names.iter().any(|c| c == "is_deleted") {
-        conn.execute_batch(&format!(
-            "ALTER TABLE {} ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
-            table
-        ))?;
-    }
-    if !names.iter().any(|c| c == "deleted_at") {
-        conn.execute_batch(&format!(
-            "ALTER TABLE {} ADD COLUMN deleted_at TEXT",
-            table
-        ))?;
+    for col in ["is_deleted", "deleted_at"] {
+        if names.iter().any(|c| c == col) {
+            conn.execute_batch(&format!(
+                "ALTER TABLE {} DROP COLUMN {}",
+                table, col
+            ))?;
+        }
     }
     Ok(())
 }

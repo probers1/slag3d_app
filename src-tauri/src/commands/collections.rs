@@ -14,7 +14,7 @@ pub async fn get_collections(app: AppHandle) -> Result<Vec<CollectionItem>, Stri
                COUNT(m.id) as model_count
         FROM collections c
         LEFT JOIN collection_models cm ON cm.collection_id = c.id
-        LEFT JOIN models m ON m.id = cm.model_id AND m.is_deleted = 0
+        LEFT JOIN models m ON m.id = cm.model_id
         WHERE c.user_id = ?
         GROUP BY c.id
         ORDER BY c.name

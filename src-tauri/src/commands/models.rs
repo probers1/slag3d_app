@@ -36,7 +36,7 @@ pub async fn get_models(
     let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
 
     // Build WHERE clause and owned params
-    let mut where_clauses = vec!["m.is_deleted = 0"];
+    let mut where_clauses: Vec<&str> = vec![];
     let mut params_list: Vec<String> = Vec::new();
 
     if let Some(ref s) = search {
@@ -163,7 +163,7 @@ pub async fn get_model_detail(
                EXISTS(SELECT 1 FROM favorites fav WHERE fav.user_id = ? AND fav.model_id = m.id) as is_favorited
         FROM models m
         LEFT JOIN users u ON u.id = m.user_id
-        WHERE m.id = ? AND m.is_deleted = 0"#,
+        WHERE m.id = ?"#,
         rusqlite::params![&user_id, &id],
         |row| {
             Ok((
