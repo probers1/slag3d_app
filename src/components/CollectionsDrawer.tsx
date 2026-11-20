@@ -35,8 +35,12 @@ export const CollectionsDrawer: React.FC<CollectionsDrawerProps> = ({
   // destructive actions use an in-app two-step confirm instead.
   const [confirmDeleteCollectionId, setConfirmDeleteCollectionId] = useState<string | null>(null);
 
-  // Build tree from flat list using parent_folder_id
-  const rootCollections = collections.filter((c) => !c.parent_folder_id);
+  // Build tree from flat list using parent_folder_id.
+  // Also treat orphaned folders (whose parent does not exist) as root collections.
+  const collectionIds = new Set(collections.map((c) => c.id));
+  const rootCollections = collections.filter(
+    (c) => !c.parent_folder_id || !collectionIds.has(c.parent_folder_id)
+  );
   const getChildren = (parentId: string) => collections.filter((c) => c.parent_folder_id === parentId);
 
   const toggleExpand = (id: string, e: React.MouseEvent) => {

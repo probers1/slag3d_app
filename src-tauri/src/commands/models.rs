@@ -3,21 +3,14 @@ use crate::commands::{
 };
 use crate::db::schema::DEFAULT_USER_ID;
 use crate::services::archive::{extract_7z, extract_zip};
-use crate::services::storage::ExtractedFile;
+use crate::services::storage::{ExtractedFile, get_unique_filename};
 use base64::{engine::general_purpose, Engine as _};
 use rusqlite::OptionalExtension;
 use std::fs;
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
-
-fn get_db_connection(app: &AppHandle) -> rusqlite::Result<rusqlite::Connection> {
-    let path_resolver = app.path();
-    let db_path = path_resolver.app_data_dir().unwrap().join("vault.db");
-    let conn = rusqlite::Connection::open(db_path)?;
-    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
-    Ok(conn)
-}
+use crate::db::get_db_connection;
 
 #[tauri::command]
 pub async fn get_models(
@@ -243,7 +236,6 @@ pub async fn import_models(
     tags: Option<String>,
     collection_id: Option<String>,
 ) -> Result<ModelDetail, String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
     let model_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let user_id = DEFAULT_USER_ID.to_string();
@@ -271,11 +263,11 @@ pub async fn import_models(
             },
             _ => {
                 // Single file - copy to model dir
-                let filename = match path.file_name() {
+                let raw_filename = match path.file_name() {
                     Some(name) => name.to_string_lossy().to_string(),
                     None => continue,
                 };
-                let dest_path = models_dir.join(&filename);
+                let (filename, dest_path) = get_unique_filename(&models_dir, &raw_filename);
                 fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
                 let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
                 vec![ExtractedFile {
@@ -297,55 +289,59 @@ pub async fn import_models(
     let model_title = title.unwrap_or_else(|| "Untitled Model".to_string());
     let model_description = description.unwrap_or_default();
 
-    conn.execute(
-        "INSERT INTO models (id, user_id, title, description, thumbnail_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
-        rusqlite::params![&model_id, &user_id, &model_title, &model_description, &now, &now],
-    ).map_err(|e| e.to_string())?;
-
-    // Insert files with public paths so the asset protocol can serve them
-    for (idx, file) in all_extracted_files.iter().enumerate() {
-        let file_id = Uuid::new_v4().to_string();
-        let mime_type = mime_guess::from_path(&file.destination_path).first_or_octet_stream().to_string();
-        let is_primary = if idx == 0 { 1 } else { 0 };
-        let public_path = format!("/uploads/models/{}/{}", model_id, file.filename);
+    {
+        let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
 
         conn.execute(
-            "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path, is_primary_3d) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            rusqlite::params![
-                &file_id, &model_id, &file.filename, &file.filename,
-                &mime_type, file.size as i64, &public_path, is_primary
-            ],
+            "INSERT INTO models (id, user_id, title, description, thumbnail_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
+            rusqlite::params![&model_id, &user_id, &model_title, &model_description, &now, &now],
         ).map_err(|e| e.to_string())?;
-    }
 
-    // Handle tags
-    if let Some(tag_string) = tags {
-        for tag_name in tag_string.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            let new_tag_id = Uuid::new_v4().to_string();
-            conn.execute(
-                "INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)",
-                rusqlite::params![&new_tag_id, tag_name],
-            ).map_err(|e| e.to_string())?;
-
-            let tag_id: String = conn.query_row(
-                "SELECT id FROM tags WHERE name = ?",
-                rusqlite::params![tag_name],
-                |row| row.get(0),
-            ).map_err(|e| e.to_string())?;
+        // Insert files with public paths so the asset protocol can serve them
+        for (idx, file) in all_extracted_files.iter().enumerate() {
+            let file_id = Uuid::new_v4().to_string();
+            let mime_type = mime_guess::from_path(&file.destination_path).first_or_octet_stream().to_string();
+            let is_primary = if idx == 0 { 1 } else { 0 };
+            let public_path = format!("/uploads/models/{}/{}", model_id, file.filename);
 
             conn.execute(
-                "INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?, ?)",
-                rusqlite::params![&model_id, &tag_id],
+                "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path, is_primary_3d) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    &file_id, &model_id, &file.filename, &file.filename,
+                    &mime_type, file.size as i64, &public_path, is_primary
+                ],
             ).map_err(|e| e.to_string())?;
         }
-    }
 
-    // Add to collection if provided
-    if let Some(cid) = collection_id {
-        conn.execute(
-            "INSERT OR IGNORE INTO collection_models (collection_id, model_id) VALUES (?, ?)",
-            rusqlite::params![&cid, &model_id],
-        ).map_err(|e| e.to_string())?;
+        // Handle tags
+        if let Some(tag_string) = tags {
+            for tag_name in tag_string.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                let new_tag_id = Uuid::new_v4().to_string();
+                conn.execute(
+                    "INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)",
+                    rusqlite::params![&new_tag_id, tag_name],
+                ).map_err(|e| e.to_string())?;
+
+                let tag_id: String = conn.query_row(
+                    "SELECT id FROM tags WHERE name = ?",
+                    rusqlite::params![tag_name],
+                    |row| row.get(0),
+                ).map_err(|e| e.to_string())?;
+
+                conn.execute(
+                    "INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?, ?)",
+                    rusqlite::params![&model_id, &tag_id],
+                ).map_err(|e| e.to_string())?;
+            }
+        }
+
+        // Add to collection if provided
+        if let Some(cid) = collection_id {
+            conn.execute(
+                "INSERT OR IGNORE INTO collection_models (collection_id, model_id) VALUES (?, ?)",
+                rusqlite::params![&cid, &model_id],
+            ).map_err(|e| e.to_string())?;
+        }
     }
 
     get_model_detail(app, model_id).await
@@ -413,11 +409,11 @@ pub async fn add_model_files(
             "7z" => extract_7z(path, &model_id)
                 .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?,
             _ => {
-                let filename = match path.file_name() {
+                let raw_filename = match path.file_name() {
                     Some(name) => name.to_string_lossy().to_string(),
                     None => continue,
                 };
-                let dest_path = models_dir.join(&filename);
+                let (filename, dest_path) = get_unique_filename(&models_dir, &raw_filename);
                 fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
                 let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
                 vec![ExtractedFile {
@@ -617,7 +613,7 @@ pub async fn toggle_favorite(app: AppHandle, id: String) -> Result<bool, String>
 /// `fetch()` a custom-scheme URL (which WebView2 on Windows intercepts
 /// differently from WKWebView, leaving the viewer and thumbnail renderer blank).
 #[tauri::command]
-pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
+pub async fn read_file(app: AppHandle, path: String) -> Result<tauri::ipc::Response, String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let uploads_dir = app_data_dir.join("uploads");
 
@@ -649,7 +645,7 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<String, String> {
     }
 
     let content = fs::read(&canonical_file).map_err(|e| e.to_string())?;
-    Ok(general_purpose::STANDARD.encode(&content))
+    Ok(tauri::ipc::Response::new(content))
 }
 
 /// Persist a downloaded asset to a user-chosen path.

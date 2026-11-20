@@ -1,6 +1,7 @@
 use crate::commands::CollectionItem;
 use crate::db::schema::DEFAULT_USER_ID;
-use tauri::{AppHandle, Manager};
+use crate::db::get_db_connection;
+use tauri::AppHandle;
 use uuid::Uuid;
 
 #[tauri::command]
@@ -38,28 +39,37 @@ pub async fn get_collections(app: AppHandle) -> Result<Vec<CollectionItem>, Stri
         collections.push(row.map_err(|e| e.to_string())?);
     }
 
-    // Build hierarchy
-    let mut roots = Vec::new();
-    let mut children_map: std::collections::HashMap<String, Vec<CollectionItem>> = std::collections::HashMap::new();
+    // Order collections hierarchically (depth-first) so children appear directly under their parents
+    // in flat dropdowns and menus, while still preserving all items in the array for the frontend tree view.
+    let mut flat_hierarchical = Vec::new();
+    let mut children_map: std::collections::HashMap<Option<String>, Vec<CollectionItem>> = std::collections::HashMap::new();
 
     for c in collections {
-        if let Some(parent_id) = &c.parent_folder_id {
-            children_map.entry(parent_id.clone()).or_default().push(c);
-        } else {
-            roots.push(c);
-        }
+        children_map.entry(c.parent_folder_id.clone()).or_default().push(c);
     }
 
-    fn attach_children(mut items: Vec<CollectionItem>, children_map: &mut std::collections::HashMap<String, Vec<CollectionItem>>) -> Vec<CollectionItem> {
-        for item in &mut items {
-            if let Some(children) = children_map.remove(&item.id) {
-                item.children = Some(attach_children(children, children_map));
+    fn flatten_tree(
+        parent_id: Option<String>,
+        children_map: &mut std::collections::HashMap<Option<String>, Vec<CollectionItem>>,
+        out: &mut Vec<CollectionItem>,
+    ) {
+        if let Some(items) = children_map.remove(&parent_id) {
+            for item in items {
+                let id = item.id.clone();
+                out.push(item);
+                flatten_tree(Some(id), children_map, out);
             }
         }
-        items
     }
 
-    Ok(attach_children(roots, &mut children_map))
+    flatten_tree(None, &mut children_map, &mut flat_hierarchical);
+
+    // Append any orphaned collections (where parent_folder_id does not exist)
+    for (_, remaining) in children_map {
+        flat_hierarchical.extend(remaining);
+    }
+
+    Ok(flat_hierarchical)
 }
 
 #[tauri::command]
@@ -109,6 +119,12 @@ pub async fn delete_collection(app: AppHandle, id: String) -> Result<(), String>
     let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
     let user_id = DEFAULT_USER_ID.to_string();
 
+    // Re-parent any sub-folders to the deleted folder's parent (or NULL if root) to prevent orphaned collections
+    conn.execute(
+        "UPDATE collections SET parent_folder_id = (SELECT parent_folder_id FROM collections WHERE id = ?1) WHERE parent_folder_id = ?1",
+        rusqlite::params![&id],
+    ).map_err(|e| e.to_string())?;
+
     // Delete collection models first
     conn.execute("DELETE FROM collection_models WHERE collection_id = ?", rusqlite::params![&id]).map_err(|e| e.to_string())?;
     // Delete collection
@@ -139,12 +155,4 @@ pub async fn remove_model_from_collection(app: AppHandle, collection_id: String,
     ).map_err(|e| e.to_string())?;
 
     Ok(())
-}
-
-fn get_db_connection(app: &AppHandle) -> rusqlite::Result<rusqlite::Connection> {
-    let path_resolver = app.path();
-    let db_path = path_resolver.app_data_dir().unwrap().join("vault.db");
-    let conn = rusqlite::Connection::open(db_path)?;
-    conn.busy_timeout(std::time::Duration::from_millis(5000))?;
-    Ok(conn)
 }

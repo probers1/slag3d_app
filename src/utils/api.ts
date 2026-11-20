@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { appDataDir } from '@tauri-apps/api/path';
-import { renderThumbnailInBrowser } from './clientThumbnailRenderer';
 
 // Detect if running inside Tauri at runtime
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
@@ -153,6 +152,10 @@ export async function apiAddModelToCollection(collectionId: string, modelId: str
   await invoke('add_model_to_collection', { collectionId, modelId });
 }
 
+export async function apiRemoveModelFromCollection(collectionId: string, modelId: string) {
+  await invoke('remove_model_from_collection', { collectionId, modelId });
+}
+
 export async function apiGetTags() {
   const data = await invoke<any[]>('get_tags');
   return await mapAssetPaths(data);
@@ -190,6 +193,7 @@ export async function apiAddModelFiles(modelId: string) {
 
 // Read an uploaded asset file via Tauri and return a blob URL.
 // Caller must revoke the URL when done (use try/finally).
+// read_file returns a base64-encoded string; we decode it to bytes before creating the blob.
 export async function fetchFileAsBlobUrl(path: string): Promise<string> {
   const base64 = await invoke<string>('read_file', { path });
   const binaryString = atob(base64);
@@ -199,9 +203,6 @@ export async function fetchFileAsBlobUrl(path: string): Promise<string> {
   }
   return URL.createObjectURL(new Blob([bytes]));
 }
-
-// Re-export client-side thumbnail renderer for use after uploads
-export { renderThumbnailInBrowser } from './clientThumbnailRenderer';
 
 export async function apiFetch(url: string, options: RequestInit = {}) {
   const method = (options.method || 'GET').toUpperCase();
@@ -307,6 +308,13 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
       const collectionId = pathname.split('/')[3];
       const body = options.body ? JSON.parse(options.body as string) : {};
       await apiAddModelToCollection(collectionId, body.model_id);
+      return makeResponse({ ok: true });
+    }
+    if (pathname.match(/^\/api\/collections\/[^/]+\/models\/[^/]+$/) && method === 'DELETE') {
+      const parts = pathname.split('/');
+      const collectionId = parts[3];
+      const modelId = parts[5];
+      await apiRemoveModelFromCollection(collectionId, modelId);
       return makeResponse({ ok: true });
     }
     // Fallback for unhandled routes.

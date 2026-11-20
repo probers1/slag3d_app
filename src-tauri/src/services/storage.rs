@@ -68,3 +68,32 @@ pub fn ensure_model_dir(model_id: &str) -> std::io::Result<PathBuf> {
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }
+
+/// Generates a unique filename within `dir` to prevent name collisions
+/// (e.g. if an archive contains files with the same name in different subdirectories).
+pub fn get_unique_filename<P: AsRef<Path>>(dir: P, base_name: &str) -> (String, PathBuf) {
+    let dir = dir.as_ref();
+    let path = Path::new(base_name);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    let mut candidate_name = if ext.is_empty() {
+        stem.to_string()
+    } else {
+        format!("{}.{}", stem, ext)
+    };
+    let mut candidate_path = dir.join(&candidate_name);
+    let mut counter = 1;
+
+    while candidate_path.exists() {
+        candidate_name = if ext.is_empty() {
+            format!("{}_{}", stem, counter)
+        } else {
+            format!("{}_{}.{}", stem, counter, ext)
+        };
+        candidate_path = dir.join(&candidate_name);
+        counter += 1;
+    }
+
+    (candidate_name, candidate_path)
+}

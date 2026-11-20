@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::fs;
-use crate::services::storage::{is_allowed_extension, ExtractedFile, get_model_dir};
+use crate::services::storage::{is_allowed_extension, ExtractedFile, get_model_dir, get_unique_filename};
 
 #[derive(Debug)]
 pub enum ArchiveError {
@@ -103,13 +103,13 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
             continue;
         }
 
-        // Flatten file structure into model_dir to avoid deep subfolder hierarchy path issues in public_path
+        // Flatten file structure into model_dir to avoid deep subfolder hierarchy path issues in public_path.
+        // If files from different subfolders share the same filename, resolve to a unique name.
         let base_filename = match Path::new(&file_name).file_name() {
             Some(name) => name,
             None => continue,
         };
-        let dest_path = model_dir.join(base_filename);
-        let safe_filename = base_filename.to_string_lossy().to_string();
+        let (safe_filename, dest_path) = get_unique_filename(&model_dir, &base_filename.to_string_lossy());
 
         // Security: prevent path traversal
         if !is_safe_path(&model_dir, &dest_path) {
@@ -167,32 +167,39 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
                 return Ok(false);
             }
 
-            // Flatten file structure into model_dir to avoid deep subfolder hierarchy path issues in public_path
+            // Flatten file structure into model_dir to avoid deep subfolder hierarchy path issues in public_path.
+            // If files from different subfolders share the same filename, resolve to a unique name.
             let base_filename = match Path::new(&file_name).file_name() {
                 Some(name) => name,
                 None => return Ok(false),
             };
-            let safe_filename = base_filename.to_string_lossy().to_string();
-            let safe_dest = model_dir.join(&safe_filename);
+            let (safe_filename, safe_dest) = get_unique_filename(&model_dir, &base_filename.to_string_lossy());
 
             // Security: prevent path traversal
             if !is_safe_path(&model_dir, &safe_dest) {
                 return Ok(false);
             }
 
-            // Extract file data
-            let mut file_data = Vec::new();
-            if reader.read_to_end(&mut file_data).is_ok() {
-                if let Err(e) = fs::write(&safe_dest, &file_data) {
-                    eprintln!("[SLAG3D 7Z] Failed to write {}: {}", safe_dest.display(), e);
+            // Stream file data directly to disk without buffering the entire file into RAM
+            let mut output_file = match fs::File::create(&safe_dest) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("[SLAG3D 7Z] Failed to create {}: {}", safe_dest.display(), e);
                     return Ok(true);
                 }
-                let size = file_data.len() as u64;
-                filtered_extracted.push(ExtractedFile {
-                    filename: safe_filename,
-                    destination_path: safe_dest.clone(),
-                    size,
-                });
+            };
+
+            match std::io::copy(reader, &mut output_file) {
+                Ok(size) => {
+                    filtered_extracted.push(ExtractedFile {
+                        filename: safe_filename,
+                        destination_path: safe_dest.clone(),
+                        size,
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[SLAG3D 7Z] Failed to write {}: {}", safe_dest.display(), e);
+                }
             }
 
             Ok(true)

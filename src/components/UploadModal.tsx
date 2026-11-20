@@ -35,7 +35,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     if (!paths.length) return;
     setSelectedPaths((prev) => [...prev, ...paths]);
     if (!title && paths[0]) {
-      const nameWithoutExt = paths[0].split('/').pop()?.replace(/\.[^/.]+$/, '') || '';
+      const filename = paths[0].split(/[/\\]/).pop() || '';
+      const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
       setTitle(nameWithoutExt);
     }
   };
@@ -109,7 +110,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   <div key={i} className="flex items-center justify-between p-2 bg-[#202028] border border-[#2c2c38] rounded-lg text-xs">
                     <div className="flex items-center gap-2 truncate">
                       <FileCode className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                      <span className="truncate text-neutral-200">{p.split('/').pop()}</span>
+                      <span className="truncate text-neutral-200">{p.split(/[/\\]/).pop()}</span>
                     </div>
                     <button type="button" onClick={() => removeFile(i)} className="p-1 text-neutral-500 hover:text-red-400">
                       <X className="w-3 h-3" />

@@ -523,6 +523,25 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
     }
   };
 
+  // Remove from Collection
+  const handleRemoveFromCollection = async (collectionId: string) => {
+    if (!model) return;
+    try {
+      const res = await apiFetch(`/api/collections/${collectionId}/models/${model.id}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        setSaveToast('Model removed from collection');
+        fetchModel();
+        onModelUpdated();
+        setTimeout(() => setSaveToast(null), 2500);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error removing from collection');
+    }
+  };
+
   // Set as primary 3D file
   const handleSetPrimaryFile = async (fileId: string) => {
     if (!model) return;
@@ -999,9 +1018,19 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
                     {model.collections.map((c) => (
                       <span
                         key={c.id}
-                        className="px-2 py-0.5 bg-blue-950/60 border border-blue-800/60 text-blue-300 rounded text-[11px]"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-950/60 border border-blue-800/60 text-blue-300 rounded text-[11px]"
                       >
-                        {c.name}
+                        <span>{c.name}</span>
+                        {isOwnerOrAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveFromCollection(c.id)}
+                            className="text-blue-400 hover:text-red-400 transition-colors p-0.5"
+                            title={`Remove from ${c.name}`}
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        )}
                       </span>
                     ))}
                   </div>

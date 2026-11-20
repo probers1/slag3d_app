@@ -1,5 +1,6 @@
 use crate::commands::TagItem;
-use tauri::{AppHandle, Manager};
+use crate::db::get_db_connection;
+use tauri::AppHandle;
 
 #[tauri::command]
 pub async fn get_tags(app: AppHandle) -> Result<Vec<TagItem>, String> {
@@ -29,10 +30,4 @@ pub async fn get_tags(app: AppHandle) -> Result<Vec<TagItem>, String> {
     }
 
     Ok(tags)
-}
-
-fn get_db_connection(app: &AppHandle) -> rusqlite::Result<rusqlite::Connection> {
-    let path_resolver = app.path();
-    let db_path = path_resolver.app_data_dir().unwrap().join("vault.db");
-    rusqlite::Connection::open(db_path)
 }

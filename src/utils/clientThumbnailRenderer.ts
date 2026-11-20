@@ -7,23 +7,19 @@ import { apiSaveThumbnail, fetchFileAsBlobUrl } from './api';
 // Cache of model IDs currently being processed client-side to prevent duplicates
 const renderingQueue = new Set<string>();
 
-export async function renderThumbnailInBrowser(
-  modelId: string,
-  filePath: string,
-  onComplete?: (thumbnailPath: string) => void
-): Promise<boolean> {
-  if (renderingQueue.has(modelId)) return false;
-  renderingQueue.add(modelId);
+// Shared offscreen WebGL renderer and scene instance.
+// Reusing a single WebGL context avoids context churn and prevents hitting
+// the browser limit (usually 8-16 active WebGL contexts).
+let sharedRendererContext: {
+  canvas: HTMLCanvasElement;
+  renderer: THREE.WebGLRenderer;
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  material: THREE.MeshStandardMaterial;
+} | null = null;
 
-  let blobUrl: string | null = null;
-  try {
-    // Use Tauri's read_file command to get raw bytes and build a blob URL.
-    // WebView2 on Windows cannot fetch custom-scheme URLs (slag3d-asset://)
-    // reliably, so we bypass the protocol entirely.
-    blobUrl = await fetchFileAsBlobUrl(filePath);
-    const ext = filePath.split('.').pop()?.toLowerCase() || 'stl';
-
-    // Create offscreen canvas (512x512)
+function getSharedRendererContext() {
+  if (!sharedRendererContext) {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 512;
@@ -59,6 +55,27 @@ export async function renderThumbnailInBrowser(
       metalness: 0.25,
     });
 
+    sharedRendererContext = { canvas, renderer, scene, camera, material };
+  }
+  return sharedRendererContext;
+}
+
+export async function renderThumbnailInBrowser(
+  modelId: string,
+  filePath: string,
+  onComplete?: (thumbnailPath: string) => void
+): Promise<boolean> {
+  if (renderingQueue.has(modelId)) return false;
+  renderingQueue.add(modelId);
+
+  let blobUrl: string | null = null;
+  try {
+    // Use Tauri's read_file command to get raw bytes and build a blob URL.
+    blobUrl = await fetchFileAsBlobUrl(filePath);
+    const ext = filePath.split('.').pop()?.toLowerCase() || 'stl';
+
+    const { canvas, renderer, scene, camera, material } = getSharedRendererContext();
+
     const fitAndRender = async (object: THREE.Object3D) => {
       scene.add(object);
 
@@ -86,9 +103,8 @@ export async function renderThumbnailInBrowser(
         onComplete(thumbnail_path);
       }
 
-      // Cleanup
-      renderer.dispose();
-      material.dispose();
+      // Detach object from the shared scene after rendering
+      scene.remove(object);
     };
 
     if (ext === 'stl') {
@@ -107,6 +123,11 @@ export async function renderThumbnailInBrowser(
         }
       });
       await fitAndRender(obj);
+      obj.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          (child as THREE.Mesh).geometry?.dispose();
+        }
+      });
     } else if (ext === '3mf') {
       const loader = new ThreeMFLoader();
       const group = await loader.loadAsync(blobUrl);
@@ -116,6 +137,11 @@ export async function renderThumbnailInBrowser(
         }
       });
       await fitAndRender(group);
+      group.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          (child as THREE.Mesh).geometry?.dispose();
+        }
+      });
     } else {
       const geom = new THREE.DodecahedronGeometry(20, 0);
       const mesh = new THREE.Mesh(geom, material);

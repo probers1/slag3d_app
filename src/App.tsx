@@ -5,9 +5,10 @@ import { Navbar } from './components/Navbar';
 import { ModelCard } from './components/ModelCard';
 import { CollectionsDrawer } from './components/CollectionsDrawer';
 import { UploadModal } from './components/UploadModal';
-import { ModelViewerModal } from './components/ModelViewerModal';
 import { Dropdown } from './components/Dropdown';
 import { apiFetch, apiInitDb } from './utils/api';
+
+const ModelViewerModal = React.lazy(() => import('./components/ModelViewerModal'));
 
 export default function App() {
   // Filter and pagination state
@@ -445,29 +446,31 @@ export default function App() {
 
       {/* 3D Model Viewer Modal */}
       {selectedModelId && (
-        <ModelViewerModal
-          modelId={selectedModelId}
-          collections={collections}
-          onClose={() => setSelectedModelId(null)}
-          onModelUpdated={(newThumbnailPath) => {
-            // Manual "Save as Thumbnail" overwrites the PNG in place at a stable URL.
-            // For immediate dashboard update: apply cache-busting optimistically FIRST.
-            // Then fetch fresh data from server. After fetch completes, re-apply
-            // cache-busting to the updated model to prevent fetchModels() from
-            // overwriting with the server's bare URL.
-            const modelId = selectedModelId;
-            if (newThumbnailPath && modelId) {
-              handleThumbnailUpdated(modelId, newThumbnailPath);
-            }
-            fetchModels().then(() => {
-              // Re-apply cache-busting after server sync to keep the fresh thumbnail
+        <React.Suspense fallback={null}>
+          <ModelViewerModal
+            modelId={selectedModelId}
+            collections={collections}
+            onClose={() => setSelectedModelId(null)}
+            onModelUpdated={(newThumbnailPath) => {
+              // Manual "Save as Thumbnail" overwrites the PNG in place at a stable URL.
+              // For immediate dashboard update: apply cache-busting optimistically FIRST.
+              // Then fetch fresh data from server. After fetch completes, re-apply
+              // cache-busting to the updated model to prevent fetchModels() from
+              // overwriting with the server's bare URL.
+              const modelId = selectedModelId;
               if (newThumbnailPath && modelId) {
                 handleThumbnailUpdated(modelId, newThumbnailPath);
               }
-            });
-            fetchCollections();
-          }}
-        />
+              fetchModels().then(() => {
+                // Re-apply cache-busting after server sync to keep the fresh thumbnail
+                if (newThumbnailPath && modelId) {
+                  handleThumbnailUpdated(modelId, newThumbnailPath);
+                }
+              });
+              fetchCollections();
+            }}
+          />
+        </React.Suspense>
       )}
     </div>
   );

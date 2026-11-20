@@ -29,6 +29,7 @@ pub fn run() {
             // out any short-lived writer instead of failing outright.
             conn.busy_timeout(std::time::Duration::from_millis(5000))?;
             crate::db::schema::init_schema(&conn)?;
+            crate::db::init_db_connection(conn);
             println!("[SLAG3D] DB initialized successfully");
 
             Ok(())
