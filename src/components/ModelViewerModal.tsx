@@ -132,6 +132,24 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const activeMeshRef = useRef<THREE.Object3D | null>(null);
+  // Incremented on every load attempt. Async blob reads and Three.js loader
+  // callbacks compare against it so a superseded load can't touch the scene.
+  const loadGenerationRef = useRef(0);
+
+  const disposeMeshObject = useCallback((object: THREE.Object3D) => {
+    sceneRef.current?.remove(object);
+    object.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        mesh.geometry?.dispose();
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((m) => m.dispose());
+        } else {
+          (mesh.material as THREE.Material | undefined)?.dispose();
+        }
+      }
+    });
+  }, []);
 
   // Fetch model details
   const fetchModel = async () => {
@@ -228,6 +246,12 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
     window.addEventListener('resize', handleResize);
 
     return () => {
+      // Invalidate any in-flight load so its callbacks become no-ops.
+      loadGenerationRef.current += 1;
+      if (activeMeshRef.current) {
+        disposeMeshObject(activeMeshRef.current);
+        activeMeshRef.current = null;
+      }
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
@@ -235,7 +259,7 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
         mountRef.current.innerHTML = '';
       }
     };
-  }, []);
+  }, [disposeMeshObject]);
 
   // Helper: calculate signed watertight volume of a buffer geometry
   const calculateMeshVolume = (geometry: THREE.BufferGeometry): number => {
@@ -272,23 +296,17 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
     const camera = cameraRef.current;
     const controls = controlsRef.current;
 
+    // Every call supersedes the previous one. Loader callbacks below check
+    // this token before adding anything to the shared scene, so switching
+    // files mid-parse can't leave an orphaned mesh behind or show stale data.
+    const generation = ++loadGenerationRef.current;
+    const isCurrent = () => generation === loadGenerationRef.current;
+
     setLoadingMesh(true);
     setMeshError(null);
 
-    // Clean up existing mesh
     if (activeMeshRef.current) {
-      scene.remove(activeMeshRef.current);
-      activeMeshRef.current.traverse((child) => {
-        if ((child as THREE.Mesh).isMesh) {
-          const mesh = child as THREE.Mesh;
-          mesh.geometry?.dispose();
-          if (Array.isArray(mesh.material)) {
-            mesh.material.forEach((m) => m.dispose());
-          } else {
-            mesh.material?.dispose();
-          }
-        }
-      });
+      disposeMeshObject(activeMeshRef.current);
       activeMeshRef.current = null;
     }
 
@@ -300,6 +318,10 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
     });
 
     const attachAndPosition = (object: THREE.Object3D, geom?: THREE.BufferGeometry) => {
+      if (!isCurrent()) {
+        disposeMeshObject(object);
+        return;
+      }
       scene.add(object);
       activeMeshRef.current = object;
 
@@ -353,6 +375,10 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       // WebView2 on Windows cannot fetch custom-scheme URLs (slag3d-asset://)
       // reliably, so we bypass the protocol entirely.
       blobUrl = await fetchFileAsBlobUrl(activeFile.file_path);
+      if (!isCurrent()) {
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        return;
+      }
       const ext = activeFile.original_name.split('.').pop()?.toLowerCase();
 
       if (ext === 'stl') {
@@ -369,9 +395,10 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
           undefined,
           (err) => {
             console.error('STL loading error:', err);
-            setMeshError(`Could not parse STL: ${String(err)}`);
             if (blobUrl) URL.revokeObjectURL(blobUrl);
             blobUrl = null;
+            if (!isCurrent()) return;
+            setMeshError(`Could not parse STL: ${String(err)}`);
             setLoadingMesh(false);
           }
         );
@@ -392,9 +419,10 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
           undefined,
           (err) => {
             console.error('OBJ loading error:', err);
-            setMeshError(`Could not parse OBJ: ${String(err)}`);
             if (blobUrl) URL.revokeObjectURL(blobUrl);
             blobUrl = null;
+            if (!isCurrent()) return;
+            setMeshError(`Could not parse OBJ: ${String(err)}`);
             setLoadingMesh(false);
           }
         );
@@ -415,9 +443,10 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
           undefined,
           (err) => {
             console.error('3MF loading error:', err);
-            setMeshError(`Could not parse 3MF: ${String(err)}`);
             if (blobUrl) URL.revokeObjectURL(blobUrl);
             blobUrl = null;
+            if (!isCurrent()) return;
+            setMeshError(`Could not parse 3MF: ${String(err)}`);
             setLoadingMesh(false);
           }
         );
@@ -430,12 +459,13 @@ export const ModelViewerModal: React.FC<ModelViewerModalProps> = ({
       }
     } catch (err) {
       console.error('Failed to load 3D file:', err);
-      setMeshError(`Could not read 3D file: ${err instanceof Error ? err.message : String(err)}`);
       if (blobUrl) URL.revokeObjectURL(blobUrl);
       blobUrl = null;
+      if (!isCurrent()) return;
+      setMeshError(`Could not read 3D file: ${err instanceof Error ? err.message : String(err)}`);
       setLoadingMesh(false);
     }
-  }, [wireframe]);
+  }, [wireframe, disposeMeshObject]);
 
   // When model or selectedFileId changes, load that file into the Three.js scene
   useEffect(() => {

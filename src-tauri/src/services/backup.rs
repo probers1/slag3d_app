@@ -272,7 +272,30 @@ pub fn extract_backup_archive(
     if !work_dir.join(DB_NAME).is_file() {
         return Err(BackupError::Invalid("vault.db is missing".to_string()));
     }
+    validate_backup_uploads(&work_dir.join("uploads"))?;
     Ok(manifest)
+}
+
+/// The uploads tree is swapped wholesale during restore. Verify up front that
+/// its shape won't break `ensure_dirs()` *after* the DB has been replaced —
+/// e.g. a crafted archive with `uploads/models` as a regular file.
+fn validate_backup_uploads(uploads: &Path) -> Result<(), BackupError> {
+    if !uploads.exists() {
+        return Ok(());
+    }
+    if !uploads.is_dir() {
+        return Err(BackupError::Invalid("uploads is not a directory".to_string()));
+    }
+    for name in ["models", "thumbnails", "tmp"] {
+        let path = uploads.join(name);
+        if path.exists() && !path.is_dir() {
+            return Err(BackupError::Invalid(format!(
+                "uploads/{} is not a directory",
+                name
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Verify the extracted database before touching the live vault.
@@ -298,9 +321,14 @@ pub fn restore_database(source_db: &Path, live_db: &mut Connection) -> Result<()
     Ok(())
 }
 
-/// Swap `uploads/` for the restored copy, keeping the old tree until the new
-/// one is in place. Both paths live under app data, so rename is atomic.
-pub fn replace_uploads_dir(app_data: &Path, restored_uploads: &Path) -> Result<(), BackupError> {
+/// Swap `uploads/` for the restored copy. Returns the staged pre-restore tree
+/// (if any) to the caller, which must delete it on success or pass it to
+/// `restore_previous_uploads` on failure. Keeping it around is what makes the
+/// DB + uploads restore reversible as a unit.
+pub fn replace_uploads_dir(
+    app_data: &Path,
+    restored_uploads: &Path,
+) -> Result<Option<PathBuf>, BackupError> {
     // Older hand-made archives may omit the directory entirely; treat that as
     // an empty vault rather than failing a valid DB restore.
     fs::create_dir_all(restored_uploads)?;
@@ -318,9 +346,26 @@ pub fn replace_uploads_dir(app_data: &Path, restored_uploads: &Path) -> Result<(
         }
         return Err(BackupError::Io(e));
     }
-    if moved_old {
-        let _ = fs::remove_dir_all(&staged);
+    Ok(if moved_old { Some(staged) } else { None })
+}
+
+/// Undo `replace_uploads_dir` by putting the staged pre-restore tree back.
+pub fn restore_previous_uploads(
+    app_data: &Path,
+    staged: Option<&Path>,
+) -> Result<(), BackupError> {
+    let Some(staged) = staged else {
+        return Ok(());
+    };
+    let current = app_data.join("uploads");
+    if current.exists() {
+        // Move the failed restore aside rather than deleting it outright, so a
+        // failure here still leaves the staged tree recoverable on disk.
+        let discarded = app_data.join(format!("uploads.failed-restore-{}", Uuid::new_v4()));
+        fs::rename(&current, &discarded)?;
+        let _ = fs::remove_dir_all(&discarded);
     }
+    fs::rename(staged, &current)?;
     Ok(())
 }
 
@@ -404,8 +449,32 @@ mod tests {
         let extracted = root.join("out");
         extract_backup_archive(&destination, &extracted).unwrap();
         assert!(extracted.join("uploads").is_dir());
-        replace_uploads_dir(&root, &extracted.join("uploads")).unwrap();
+        let _ = replace_uploads_dir(&root, &extracted.join("uploads")).unwrap();
         assert!(root.join("uploads").is_dir());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn uploads_swap_can_be_rolled_back() {
+        let root = temp_dir("uploads-rollback");
+        let current = root.join("uploads");
+        fs::create_dir_all(current.join("models/m1")).unwrap();
+        fs::write(current.join("models/m1/part.stl"), b"original").unwrap();
+
+        let restored = root.join("restored-uploads");
+        fs::create_dir_all(restored.join("models/m2")).unwrap();
+        fs::write(restored.join("models/m2/other.stl"), b"backup").unwrap();
+
+        let staged = replace_uploads_dir(&root, &restored)
+            .unwrap()
+            .expect("the old uploads tree should be staged");
+        assert_eq!(fs::read(staged.join("models/m1/part.stl")).unwrap(), b"original");
+        assert_eq!(fs::read(current.join("models/m2/other.stl")).unwrap(), b"backup");
+
+        restore_previous_uploads(&root, Some(&staged)).unwrap();
+        assert_eq!(fs::read(current.join("models/m1/part.stl")).unwrap(), b"original");
+        assert!(!current.join("models/m2").exists());
+
         fs::remove_dir_all(&root).unwrap();
     }
 

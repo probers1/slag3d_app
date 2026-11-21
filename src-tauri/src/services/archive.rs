@@ -193,6 +193,15 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
 
     let mut filtered_extracted: Vec<ExtractedFile> = Vec::new();
 
+    // sevenz-rust decodes every file in a folder from one shared stream. If a
+    // skipped entry isn't drained, the next file in that folder starts at the
+    // wrong offset. Returning `false` from the callback aborts the whole
+    // iteration, so skipped entries must be drained and then return `true`.
+    fn drain_entry(reader: &mut dyn std::io::Read) {
+        let mut sink = std::io::sink();
+        let _ = std::io::copy(reader, &mut sink);
+    }
+
     sevenz_rust::decompress_with_extract_fn(
         file,
         &model_dir,
@@ -201,6 +210,7 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
 
             // Skip directories (some archives mark dirs explicitly, others end with /)
             if entry.is_directory() || file_name.ends_with('/') || file_name.ends_with('\\') {
+                drain_entry(reader);
                 return Ok(true);
             }
 
@@ -211,25 +221,31 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
             // Check component-by-component (not substring) so a legitimate file
             // like "foo..bar.stl" isn't rejected.
             if file_name.split('/').any(|c| c == "..") || file_name.split('\\').any(|c| c == "..") {
-                return Ok(false);
+                drain_entry(reader);
+                return Ok(true);
             }
 
             // Only extract allowed extensions (.stl, .3mf, .obj, .pdf)
             if !is_allowed_extension(&file_name) {
-                return Ok(false);
+                drain_entry(reader);
+                return Ok(true);
             }
 
             // Flatten file structure into model_dir to avoid deep subfolder hierarchy path issues in public_path.
             // If files from different subfolders share the same filename, resolve to a unique name.
             let base_filename = match Path::new(&file_name).file_name() {
                 Some(name) => name,
-                None => return Ok(false),
+                None => {
+                    drain_entry(reader);
+                    return Ok(true);
+                }
             };
             let (safe_filename, safe_dest) = get_unique_filename(&model_dir, &base_filename.to_string_lossy());
 
             // Security: prevent path traversal
             if !is_safe_path(&model_dir, &safe_dest) {
-                return Ok(false);
+                drain_entry(reader);
+                return Ok(true);
             }
 
             // Stream file data directly to disk without buffering the entire file into RAM
@@ -237,6 +253,7 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
                 Ok(f) => f,
                 Err(e) => {
                     eprintln!("[SLAG3D 7Z] Failed to create {}: {}", safe_dest.display(), e);
+                    drain_entry(reader);
                     return Ok(true);
                 }
             };
@@ -251,6 +268,7 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
                 }
                 Err(e) => {
                     eprintln!("[SLAG3D 7Z] Failed to write {}: {}", safe_dest.display(), e);
+                    drain_entry(reader);
                 }
             }
 
@@ -263,4 +281,55 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
     }
 
     Ok(filtered_extracted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sevenz_rust::{SevenZArchiveEntry, SevenZWriter};
+    use std::path::PathBuf;
+
+    #[test]
+    fn extract_7z_skips_disallowed_entries_and_keeps_later_models() {
+        let root = std::env::temp_dir().join(format!(
+            "slag3d-7z-skip-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        // extract_7z resolves its destination through get_model_dir(), which
+        // reads this env var. No other test in this crate touches it.
+        std::env::set_var("SLAG3D_APP_DATA_DIR", &root);
+
+        let archive = root.join("mixed.7z");
+        {
+            let mut writer = SevenZWriter::create(&archive).unwrap();
+            let entries: [(&str, &[u8]); 4] = [
+                ("readme.txt", b"not a model"),
+                ("first.stl", b"solid first\nendsolid first\n"),
+                ("__MACOSX/junk.bin", b"junk"),
+                ("second.obj", b"v 0 0 0\n"),
+            ];
+            for (name, data) in entries {
+                let mut entry = SevenZArchiveEntry::default();
+                entry.name = name.to_string();
+                entry.has_stream = true;
+                writer.push_archive_entry::<&[u8]>(entry, Some(data)).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+
+        let result = extract_7z(&archive, "test-model");
+        // Restore the env var before asserting so a panic doesn't leak it.
+        std::env::remove_var("SLAG3D_APP_DATA_DIR");
+
+        let files = result.unwrap();
+        assert_eq!(files.len(), 2, "expected both valid model files to extract");
+        let model_dir: PathBuf = root.join("uploads/models/test-model");
+        assert_eq!(fs::read(model_dir.join("first.stl")).unwrap(), b"solid first\nendsolid first\n");
+        assert_eq!(fs::read(model_dir.join("second.obj")).unwrap(), b"v 0 0 0\n");
+        assert!(!model_dir.join("readme.txt").exists());
+        assert!(!model_dir.join("junk.bin").exists());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
 }

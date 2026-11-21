@@ -8,7 +8,7 @@ use crate::services::storage::{ExtractedFile, get_unique_filename, is_3d_file};
 use base64::{engine::general_purpose, Engine as _};
 use rusqlite::OptionalExtension;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 use crate::db::get_db_connection;
@@ -499,35 +499,71 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
     // model can never be recovered from either surface.
     let mut conn = get_db_connection(&app).map_err(|e| e.to_string())?;
 
-    // 1. Purge model files directory
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let models_dir = app_data_dir.join("uploads").join("models").join(&id);
-    if models_dir.exists() {
-        fs::remove_dir_all(&models_dir).map_err(|e| e.to_string())?;
-    }
-
-    // 2. Purge cached thumbnail
     let thumb_path = app_data_dir.join("uploads").join("thumbnails").join(format!("{}.png", id));
-    if thumb_path.exists() {
-        fs::remove_file(&thumb_path).map_err(|e| e.to_string())?;
+
+    // Stage the files on disk before touching the DB. Renames within app data
+    // are atomic and reversible, so a failed DB transaction can put everything
+    // back. Deleting files first would leave DB rows pointing at missing files.
+    let staging = app_data_dir.join(format!(".delete-staging-{}", Uuid::new_v4()));
+    fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    let mut staged_model: Option<PathBuf> = None;
+    let mut staged_thumb: Option<PathBuf> = None;
+
+    if models_dir.exists() {
+        let dest = staging.join("model");
+        if let Err(e) = fs::rename(&models_dir, &dest) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(e.to_string());
+        }
+        staged_model = Some(dest);
     }
 
-    // 3. Delete database record. The Tauri schema declares `files.model_id`
+    if thumb_path.exists() {
+        let dest = staging.join("thumbnail.png");
+        if let Err(e) = fs::rename(&thumb_path, &dest) {
+            if let Some(ref model) = staged_model {
+                let _ = fs::rename(model, &models_dir);
+            }
+            let _ = fs::remove_dir_all(&staging);
+            return Err(e.to_string());
+        }
+        staged_thumb = Some(dest);
+    }
+
+    // Delete database record. The Tauri schema declares `files.model_id`
     // etc. without REFERENCES, so SQLite won't cascade — clean up the
     // dependents explicitly or they'd orphan.
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM model_tags WHERE model_id = ?", rusqlite::params![&id])
-        .map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM favorites WHERE model_id = ?", rusqlite::params![&id])
-        .map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM collection_models WHERE model_id = ?", rusqlite::params![&id])
-        .map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM files WHERE model_id = ?", rusqlite::params![&id])
-        .map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM models WHERE id = ?", rusqlite::params![&id])
-        .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
+    let delete_result = (|| -> Result<(), String> {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM model_tags WHERE model_id = ?", rusqlite::params![&id])
+            .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM favorites WHERE model_id = ?", rusqlite::params![&id])
+            .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM collection_models WHERE model_id = ?", rusqlite::params![&id])
+            .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM files WHERE model_id = ?", rusqlite::params![&id])
+            .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM models WHERE id = ?", rusqlite::params![&id])
+            .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    })();
 
+    if let Err(e) = delete_result {
+        // DB unchanged — put the staged files back so the vault stays whole.
+        if let Some(ref model) = staged_model {
+            let _ = fs::rename(model, &models_dir);
+        }
+        if let Some(ref thumb) = staged_thumb {
+            let _ = fs::rename(thumb, &thumb_path);
+        }
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
+
+    // DB committed; the staged files are now unreferenced and safe to drop.
+    let _ = fs::remove_dir_all(&staging);
     Ok(())
 }
 
