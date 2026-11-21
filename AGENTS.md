@@ -1,203 +1,33 @@
-# SLAG3D Developer Guide — Tauri v2 Desktop App
+# SLAG3D — OpenCode notes
 
-## Quick Reference
+Tauri v2 desktop app: React 19 + Vite (`src/`) and Rust (`src-tauri/`), single local user, no auth. No other instruction files; `.opencode/opencode.json` only loads a plugin.
 
-### Commands
-```bash
-npm run tauri dev         # Development mode (Vite + Tauri with hot reload)
-npm run build:desktop     # Production build — native installers
-npm run build:client      # Frontend only build (Vite)
-npm run build             # Alias for build:client
-```
+## Read the right sources
 
-### Database
-- **Location**: OS app data directory
-  - Linux: `~/.local/share/slag3d/vault.db`
-  - Windows: `%APPDATA%\slag3d\vault.db`
-  - macOS: `~/Library/Application Support/slag3d/vault.db`
-- **Schema Version**: 5 (includes legacy user_id migration)
-- **Engine**: SQLite via `rusqlite` (Rust), WAL mode
-- **Migrations**: Auto-run on startup (`src-tauri/src/db/schema.rs`)
+- `README.md`, `AUDIT_REPORT.md`, `MIGRATION_GUIDE.md` and `docs/superpowers/*` describe the **retired Express/Puppeteer web server** (`npm run dev/start`, JWT, soft deletes, schema v4, Puppeteer thumbnails). Those scripts and deps do not exist. Trust `package.json`, `src-tauri/tauri.conf.json`, and the code instead. README's native prerequisite packages are still valid.
+- Current DB schema is **v6** (hard deletes; legacy `is_deleted`/`deleted_at` dropped on startup), not README's v4.
 
----
+## Commands
 
-## File System Structure
+- `npm run build:client` → `dist/` (`npm run build` is an alias). This is the only frontend verification script: no lint, typecheck, or test script exists for `src/`.
+- `cd src-tauri && cargo check` and `cargo test` (14 unit tests: migrations, extension allowlist, path traversal, backup round-trip). Run both after Rust changes.
+- `npm run tauri dev` does **not** start Vite: `tauri.conf.json` has no `beforeDevCommand`, and `devUrl` is `http://localhost:3000` while Vite defaults to 5173. Start Vite on port 3000 (`npx vite --port 3000`) alongside it, or deliberately change the config.
+- `npm run build:desktop` = `sync-version && tauri build`. `scripts/sync-version.js` rewrites committed `package.json` and `tauri.conf.json` versions from the latest `v*` git tag (not `Cargo.toml`), so expect dirty files afterward. CI runs `npm run tauri build` directly, using committed versions.
+- Bundle targets are only `appimage` and `nsis` in `tauri.conf.json`; README's `.deb`/`.msi`/`.dmg` claims are aspirational. Output: `src-tauri/target/release/bundle/`.
 
-```
-slag3D_app/
-├── src-tauri/                 # Rust Desktop Application Backend
-│   ├── Cargo.toml
-│   ├── tauri.conf.json        # Tauri v2 configuration
-│   ├── build.rs
-│   ├── icons/                 # Platform application icons
-│   └── src/
-│       ├── main.rs            # Entry point
-│       ├── lib.rs             # Tauri setup & command registration
-│       ├── db/
-│       │   ├── mod.rs         # SQLite initialization & WAL mode
-│       │   └── schema.rs      # Schema definition & migrations v1..v5
-│       ├── commands/          # IPC commands invoked by React
-│       │   ├── models.rs
-│       │   ├── collections.rs
-│       │   ├── tags.rs
-│       │   └── app.rs         # App info, storage location commands
-│       ├── protocol.rs        # Custom slag3d-asset:// protocol
-│       └── services/
-│           ├── archive.rs     # Zip / 7z extraction logic
-│           └── storage.rs     # Local directory manager
-├── src/                       # React 19 Frontend
-│   ├── App.tsx
-│   ├── components/
-│   │   ├── Navbar.tsx
-│   │   ├── ModelCard.tsx
-│   │   ├── ModelViewerModal.tsx
-│   │   ├── CollectionsDrawer.tsx
-│   │   ├── UploadModal.tsx
-│   │   └── ErrorBoundary.tsx
-│   ├── utils/
-│   │   ├── api.ts             # Tauri IPC bridge wrapper
-│   │   └── clientThumbnailRenderer.ts
-│   └── types.ts
-├── package.json               # Frontend dependencies & Tauri CLI
-├── vite.config.ts             # Vite configuration for Tauri
-└── docs/
-    └── superpowers/specs/2026-11-09-tauri-conversion-design.md
-```
+## Architecture that affects edits
 
----
+- Components call `apiFetch('/api/...')` from `src/utils/api.ts`: a shim mapping legacy Express REST paths to Tauri `invoke()` commands. Add routes there and register commands in `src-tauri/src/lib.rs`; there is no HTTP server. Unhandled routes deliberately warn and return 404.
+- Thumbnails are client-side: `ModelCard` → `src/utils/renderQueue.ts` (serial, deduped, capped) → `clientThumbnailRenderer.ts` (Three.js/WebGL) → `invoke('save_thumbnail')`. `/api/models/{id}/regenerate-thumbnail` is an intentional no-op that flips status to pending.
+- `read_file` returns raw IPC bytes; `fetchFileAsBlobUrl` handles ArrayBuffer, JSON byte array, and base64 because all three occur across Tauri transports. Keep all branches.
+- Downloads use a native save dialog plus `invoke('save_downloaded_file', { sourcePath, destPath })` — anchor-click downloads silently fail on Linux AppImage. PDF attachments render in `PdfViewerModal` via a blob with `application/pdf` MIME.
+- All asset path resolution (custom protocol, `read_file`, `save_downloaded_file`) goes through `services/path_util.rs::resolve_upload_relative_path` — scheme variants, URL decoding, canonical containment. Put path/security fixes there; archive extraction has its own `is_safe_path` in `services/archive.rs`.
+- Backup/restore: Navbar → `BackupModal` → `invoke('create_backup' | 'import_backup')` (`commands/backup.rs`, `services/backup.rs`). The ZIP holds `manifest.json`, a `vault.db` snapshot made with `VACUUM INTO`, and `uploads/` (no `tmp/`). Restore validates the archive, copies the DB into the existing live connection via SQLite's online backup API, migrates, and swaps `uploads/`; scratch space is `<app_data>/.backup-work`.
+- `slag3d-asset://` serves files under `<app_data>/uploads`; Windows/WebView2 uses `http://slag3d-asset.localhost/...`. `toAssetUrl` in `api.ts` rewrites only thumbnail paths; model files go through `read_file` → blob URL.
+- DB: one shared `Mutex<Connection>` with WAL + 5s busy_timeout; migrations run on every startup in `db/schema.rs`; `DEFAULT_USER_ID` stands in for the single user. Get paths from `services/storage.rs` helpers (`get_app_data_dir`, `get_uploads_dir`, `get_models_dir`, `get_thumbnails_dir`, `get_tmp_dir`, `get_model_dir`, `ensure_model_dir`, `get_unique_filename`) and `SLAG3D_APP_DATA_DIR` — never hardcode them.
 
-## Storage Paths
+## Gotchas
 
-- **Never** hardcode paths — use `src-tauri/src/services/storage.rs` helpers:
-  - `get_app_data_dir()` → OS standard app data directory
-  - `get_uploads_dir()` → `<app_data>/uploads`
-  - `get_models_dir()` → `<app_data>/uploads/models`
-  - `get_thumbnails_dir()` → `<app_data>/uploads/thumbnails`
-  - `get_tmp_dir()` → `<app_data>/uploads/tmp`
-  - `get_model_dir(model_id)` → `<app_data>/uploads/models/<id>`
-- Tauri `PathResolver` provides the base directory at runtime
-- `SLAG3D_APP_DATA_DIR` env var set at startup for Rust utilities
-
----
-
-## Environment Variables
-
-| Variable | Purpose |
-|----------|---------|
-| `SLAG3D_APP_DATA_DIR` | Set automatically by Tauri at runtime |
-| `GTK_THEME` | Set to `Adwaita:dark` on Linux for native dark theme |
-
-**No secrets required** — desktop app has no authentication, no JWT, no sessions.
-
----
-
-## Thumbnail Engine
-
-### Flow (Client-Side WebGL)
-1. User imports model via native file dialog
-2. Frontend loads file in Three.js offscreen canvas
-3. Renders 512×512 PNG via `clientThumbnailRenderer.ts`
-4. Sends base64 PNG to Rust via `invoke('save_thumbnail', { id, base64 })`
-5. Rust saves to `<app_data>/uploads/thumbnails/<id>.png`
-
-### No Puppeteer / No Headless Chromium / No Job Queue
-
----
-
-## Architecture
-
-| Layer | Technology |
-|-------|------------|
-| Frontend | React 19, TypeScript, Tailwind CSS 4, Three.js |
-| Backend | Rust (Tauri v2), `rusqlite`, `zip`, `sevenz-rust`, `tokio` |
-| Database | SQLite (WAL mode), single local user |
-| IPC | Tauri commands (`invoke()`) + custom `slag3d-asset://` protocol |
-| File Dialogs | `@tauri-apps/plugin-dialog` (native OS pickers) |
-
----
-
-## IPC Commands (Rust → Frontend)
-
-| Command | Description |
-|---------|-------------|
-| `get_models` | Paginated search & filtering |
-| `get_model_detail` | Full model details, files, tags, collections |
-| `import_models` | Import files/archives from native dialog |
-| `update_model` | Update metadata (title, description, tags) |
-| `delete_model` | Remove model + files |
-| `delete_model_file` | Remove individual file from model |
-| `toggle_favorite` | Toggle favorite status |
-| `save_thumbnail` | Save base64 PNG from WebGL render |
-| `add_model_files` | Add additional files to existing model |
-| `read_file` | Read file content via `slag3d-asset://` |
-| `get_collections` | Hierarchy of collections/folders |
-| `create_collection` | Create new collection/folder |
-| `rename_collection` | Rename collection |
-| `delete_collection` | Delete collection |
-| `add_model_to_collection` | Assign model to collection |
-| `remove_model_from_collection` | Unassign model from collection |
-| `get_tags` | List tags with usage counts |
-| `init_db` | Re-initialize database (dev) |
-
----
-
-## Custom Asset Protocol
-
-`slag3d-asset://` — Serves local files to WebView securely:
-- `slag3d-asset://models/<model_id>/<filename>` → 3D model files
-- `slag3d-asset://thumbnails/<model_id>.png` → Thumbnail images
-- Path traversal blocked, MIME types validated, range requests supported
-
----
-
-## Development
-
-### Prerequisites
-- Node.js 20+
-- Rust 1.93+ (`rustup update`)
-- Linux: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`
-- Windows: MinGW-w64 or Visual Studio Build Tools
-- macOS: Xcode Command Line Tools
-
-### Workflow
-```bash
-npm install                    # Install frontend deps
-npm run tauri dev             # Start dev (Vite HMR + Rust hot reload)
-# Edit src/ → UI updates instantly
-# Edit src-tauri/src/ → Rust recompiles, app reloads
-```
-
-### Building
-```bash
-npm run build:desktop         # Creates native installers in src-tauri/target/release/bundle/
-# Linux:   .AppImage, .deb
-# Windows: .msi, .exe (NSIS)
-# macOS:   .dmg, .app
-```
-
----
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| `tauri dev` fails on Linux | Install WebKitGTK deps (see Prerequisites) |
-| Rust compile errors | `cd src-tauri && cargo check` for details |
-| Database locked | Ensure no other instance running; WAL handles concurrency |
-| Thumbnails not generating | Check WebGL support in WebView; fallback renders wireframe |
-| Large file import slow | Uses streaming; check `slag3d-asset://` protocol handler |
-| App won't start on Windows | Install WebView2 Runtime (usually pre-installed on Win10+) |
-
----
-
-## Notes for Working with OpenCode
-
-- **Rust backend**: Edit `src-tauri/src/**/*.rs` → `cargo check` in `src-tauri/` to verify
-- **Frontend**: Edit `src/**/*.tsx` → HMR updates in `tauri dev`
-- **Typescript**: Use `@/*` path aliases pointing to `src/`
-- **Three.js**: Bundled via Vite; check `src/utils/clientThumbnailRenderer.ts` for rendering logic
-- **Database changes**: Modify `src-tauri/src/db/schema.rs` migrations, bump version
-
----
-
-**Last Updated**: Nov 2026 — Tauri v2 Desktop Architecture
+- `vite.config.ts`: `DISABLE_HMR=true` disables both HMR and file watching (AI Studio workaround) — leave that logic intact.
+- `main.rs` sets `GTK_THEME=Adwaita:dark` unless already set, for native GTK select popups.
+- The release workflow builds on `v*` tags across Linux/Windows/macOS; the Windows cross-build needs `RUSTFLAGS=-C link-arg=-fuse-ld=lld`.

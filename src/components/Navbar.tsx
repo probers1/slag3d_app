@@ -1,16 +1,18 @@
 import React from 'react';
-import { Upload } from 'lucide-react';
+import { Archive, Upload } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: 'all' | 'favorites' | 'collections';
   onTabChange: (tab: 'all' | 'favorites' | 'collections') => void;
   onOpenUpload: () => void;
+  onOpenBackup: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onTabChange,
   onOpenUpload,
+  onOpenBackup,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-[#16161a]/95 backdrop-blur-md border-b border-[#262630] px-4 lg:px-8 py-3.5">
@@ -58,6 +60,14 @@ export const Navbar: React.FC<NavbarProps> = ({
         </nav>
 
         <div className="flex items-center gap-2.5 shrink-0">
+          <button
+            onClick={onOpenBackup}
+            title="Backup & restore"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-neutral-300 bg-[#22222c] border border-[#343444] rounded-lg hover:bg-[#2b2b37] hover:text-white transition-all whitespace-nowrap shrink-0"
+          >
+            <Archive className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">Backup</span>
+          </button>
           <button
             onClick={onOpenUpload}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-500 shadow-md shadow-blue-600/20 active:scale-98 transition-all whitespace-nowrap shrink-0"

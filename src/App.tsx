@@ -5,6 +5,7 @@ import { Navbar } from './components/Navbar';
 import { ModelCard } from './components/ModelCard';
 import { CollectionsDrawer } from './components/CollectionsDrawer';
 import { UploadModal } from './components/UploadModal';
+import { BackupModal } from './components/BackupModal';
 import { Dropdown } from './components/Dropdown';
 import { apiFetch, apiInitDb } from './utils/api';
 import { ModelViewerModal } from './components/ModelViewerModal';
@@ -27,6 +28,7 @@ export default function App() {
 
   // Modals state
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
 
   // Fetch Collections list
@@ -207,6 +209,7 @@ export default function App() {
         activeTab={activeTab}
         onTabChange={handleTabChange}
         onOpenUpload={() => setIsUploadOpen(true)}
+        onOpenBackup={() => setIsBackupOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -442,6 +445,18 @@ export default function App() {
       )}
 
 
+
+      {/* Backup & Restore Modal */}
+      {isBackupOpen && (
+        <BackupModal
+          onClose={() => setIsBackupOpen(false)}
+          onRestored={() => {
+            setIsBackupOpen(false);
+            setSelectedModelId(null);
+            window.location.reload();
+          }}
+        />
+      )}
 
       {/* 3D Model Viewer Modal */}
       {selectedModelId && (

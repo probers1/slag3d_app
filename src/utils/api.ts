@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { appDataDir } from '@tauri-apps/api/path';
+import { BackupInfo } from '../types';
 
 // Detect if running inside Tauri at runtime
 const isTauri = typeof window !== 'undefined' && ('__TAURI__' in window || '__TAURI_INTERNALS__' in window);
@@ -175,6 +176,14 @@ export async function pickFiles(multiple = true, filters?: string[]) {
 
 export async function apiInitDb() {
   await invoke('init_db');
+}
+
+export async function apiCreateBackup(destination: string) {
+  return await invoke<BackupInfo>('create_backup', { destination });
+}
+
+export async function apiImportBackup(archivePath: string) {
+  return await invoke<BackupInfo>('import_backup', { archivePath });
 }
 
 /**

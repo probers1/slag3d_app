@@ -53,6 +53,13 @@ pub fn get_tmp_dir() -> PathBuf {
     get_uploads_dir().join("tmp")
 }
 
+/// Scratch space for backup export/import. Deliberately outside `uploads/`:
+/// during a restore the whole `uploads/` tree is swapped out, and nothing in
+/// the work dir should ever be served by the `slag3d-asset://` protocol.
+pub fn get_backup_work_dir() -> PathBuf {
+    get_app_data_dir().join(".backup-work")
+}
+
 pub fn ensure_dirs() -> std::io::Result<()> {
     for dir in [
         get_uploads_dir(),

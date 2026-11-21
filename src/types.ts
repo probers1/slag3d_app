@@ -1,3 +1,10 @@
+export interface BackupInfo {
+  path: string;
+  size: number;
+  created_at: string;
+  model_count: number;
+}
+
 export interface User {
   id: string;
   username: string;

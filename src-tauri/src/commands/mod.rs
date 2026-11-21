@@ -2,6 +2,7 @@ pub mod models;
 pub mod collections;
 pub mod tags;
 pub mod app;
+pub mod backup;
 
 use serde::{Deserialize, Serialize};
 

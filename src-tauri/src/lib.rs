@@ -54,6 +54,8 @@ pub fn run() {
             commands::collections::remove_model_from_collection,
             commands::tags::get_tags,
             commands::app::init_db,
+            commands::backup::create_backup,
+            commands::backup::import_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
