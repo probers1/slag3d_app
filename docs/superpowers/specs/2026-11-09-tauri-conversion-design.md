@@ -1,5 +1,7 @@
 # SLAG3D Tauri v2 Desktop Conversion Design
 
+> **Historical design document.** This is the original conversion spec, not a description of the shipped app. Some details have changed since it was written: the schema is v6 with hard deletes, thumbnails are client-side via a serial render queue, bundles are AppImage/NSIS/DMG only, and full-vault backup/restore was added. For current behaviour use [README.md](../../../README.md), [AGENTS.md](../../../AGENTS.md) and [SECURITY_GUIDE.md](../../../SECURITY_GUIDE.md).
+
 ## 1. Intent & Purpose
 Convert SLAG3D from a Node.js/Express web server application into a standalone, cross-platform desktop application using **Tauri v2** (Rust backend + React/Three.js frontend). The app will run natively on Linux, Windows, and macOS as a local desktop tool for 3D printing asset management.
 

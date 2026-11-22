@@ -1,262 +1,117 @@
-# SLAG3D 🖨️ — Multi-User 3D Model Repository
+# SLAG3D — 3D Vault
 
-A self-hosted mesh repository and dashboard for 3D printer models, print farms, and workshop teams.
+A local, single-user desktop app for organising 3D printing assets. Built with Tauri v2 (Rust + native WebView), React 19, Three.js and SQLite. There is no server, no login and no network dependency at runtime.
 
 ---
 
 ## Features
 
-| Feature | Description |
-|---------|-------------|
-| **Headless Thumbnail Engine** | Puppeteer + Three.js → 512×512 PNGs (concurrency: 2, exponential retry) |
-| **3D Model Viewer** | Embedded Three.js viewer (.stl, .3mf, .obj with OrbitControls, wireframe toggle) |
-| **Mesh Analytics** | Bounding box, volume (cm³), weight estimate, filament cost calculator |
-| **Archive Extraction** | Multi-file uploads (.zip, .7z → auto-extract, detect primary 3D file) |
-| **Collections & Folders** | Nested folder hierarchy with model organization |
-| **Dual Authentication** | Session cookies + JWT Bearer tokens (iframe-safe) |
-| **Admin Panel** | User management, provisioning, password resets |
+- **Model library** — import `.stl`, `.3mf`, `.obj` and PDF attachments; `.zip` / `.7z` archives are extracted automatically.
+- **3D viewer** — orbit controls, wireframe toggle, multi-file inspection, bounding-box dimensions, volume and filament weight estimate.
+- **PDF attachments** — opened inline with the OS WebView PDF viewer.
+- **Organisation** — nested collections, tags, favourites, search and filters.
+- **Thumbnails** — rendered client-side with Three.js/WebGL through a serial render queue; no Puppeteer or headless browser.
+- **Backup & restore** — export/import the whole vault as one ZIP (database snapshot + uploads).
+- **Native dialogs** — OS file pickers for imports, backup destination and downloads.
 
 ---
 
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
 |-------|------------|
-| Runtime | Node.js 20 / Express 4 |
-| Database | SQLite (`better-sqlite3`, WAL mode) |
-| Frontend | React 19, TypeScript, Tailwind CSS |
-| 3D Engine | Three.js with STLLoader, OBJLoader, ThreeMFLoader |
-| **Desktop** | **Tauri v2 (Rust backend + native WebView)** |
+| Desktop shell | Tauri v2 (Rust, native WebView) |
+| Frontend | React 19, TypeScript, Tailwind CSS 4, Vite 8 |
+| 3D | Three.js (`STLLoader`, `OBJLoader`, `3MFLoader`, `OrbitControls`) |
+| Backend | Rust: `rusqlite`, `zip`, `sevenz-rust`, `tauri-plugin-dialog` |
+| Database | SQLite (`vault.db`), WAL mode, schema v6 |
 
 ---
 
-## Quick Start
-
-### Development (Web Server)
-```bash
-cp .env.example .env   # Fill in the three secrets, set GOOSE_SEED_DB=true
-npm install && npm run dev
-# First run seeds: admin / admin123 (change immediately)
-```
-
-### Development (Desktop App)
-```bash
-npm install && npm run tauri dev
-# Launches Vite dev server + Tauri native window with hot reload
-```
-
-### Production (Web Server)
-```bash
-cp .env.example .env   # Fill in all secrets and a strong ADMIN_PASSWORD
-npm run build && npm start
-```
-
-### Production (Desktop App)
-```bash
-npm run build:desktop
-# Builds native installers for all platforms
-```
-
----
-
-## Environment Variables
-
-```bash
-JWT_SECRET=<min 32 chars>          # Required
-REFRESH_TOKEN_SECRET=<min 32>      # Required
-SESSION_SECRET=<min 32 chars>      # Required
-GOOSE_SEED_DB=true                # Seed first admin (dev / first deploy)
-ADMIN_USER=admin                  # Optional, defaults to admin
-ADMIN_PASSWORD=<strong password>  # Seeds this password on first run
-SESSION_EXPIRY_MINUTES=1440       # Default: 24 hours
-```
-
-Generate secret: `openssl rand -base64 52`
-
----
-
-## File Uploads
-
-**Allowed**: `.stl`, `.3mf`, `.obj`, `.zip`, `.7z` (max 300MB)
-**Rate Limit**: 30 requests/hour per IP
-
-Security checks block executables, scripts, image files.
-
----
-
-## Database Schema
-
-```sql
-users, models, files, tags, model_tags, 
-favorites, collections, collection_models, auth_tokens
-```
-
-Schema version **4** — see [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md)
-
----
-
-## API Quick Reference
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/models` | ✓ | Paginated search (search, tags, filters) |
-| POST | `/api/models` | ✓ | Multi-file upload or archive extraction |
-| POST | `/api/auth/login` | — | Returns access + refresh tokens |
-| POST | `/api/auth/refresh` | ✓ | Token rotation endpoint |
-
-See full API reference in docs folder.
-
----
-
-## Desktop App (Tauri v2)
-
-SLAG3D now includes a native cross-platform desktop application built with Tauri v2.
-
-### Architecture
-- **Frontend**: React 19 + Three.js + Tailwind CSS (runs in native OS WebView)
-- **Backend**: Rust (SQLite via `rusqlite`, native zip/7z extraction, custom asset protocol)
-- **Platforms**: Linux, Windows, macOS
+## Development
 
 ### Prerequisites
 
-#### Linux (Ubuntu/Debian)
-```bash
-sudo apt update && sudo apt install -y \
-  libwebkit2gtk-4.1-0 \
-  libgtk-3-0 \
-  libayatana-appindicator3-1 \
-  librsvg2-common \
-  build-essential \
-  curl \
-  wget \
-  libssl-dev \
-  libappindicator3-dev \
-  librsvg2-dev \
-  libwebkit2gtk-4.1-dev
-```
+- Node.js 22+ and Rust (stable)
+- Platform WebView/build dependencies:
+  - **Linux (Ubuntu/Debian)**: `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev build-essential curl wget file`
+  - **Windows**: Visual Studio Build Tools or MinGW-w64
+  - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
 
-#### Windows
-- Rust toolchain: `rustup target add x86_64-pc-windows-gnu`
-- Visual Studio Build Tools or MinGW-w64
-
-#### macOS
-- Xcode Command Line Tools: `xcode-select --install`
-
-### Building Desktop Packages
-
-The desktop app is built using `tauri build` which creates native installers for each platform.
-
-#### Build Commands
-
-| Command | Description |
-|---------|-------------|
-| `npm run tauri dev` | Development mode with hot reload |
-| `npm run tauri build` | Production build for current platform |
-| `npm run build:desktop` | Alias for `tauri build` |
-
-#### Output Formats
-
-| Platform | Formats |
-|----------|---------|
-| **Linux** | `.AppImage`, `.deb` |
-| **Windows** | `.msi`, `.exe` (NSIS installer) |
-| **macOS** | `.dmg`, `.app` |
-
-#### Cross-Compilation Notes
-
-To build for other platforms, you need the appropriate Rust targets:
-```bash
-# Windows from Linux
-rustup target add x86_64-pc-windows-gnu
-
-# Linux from Windows
-rustup target add x86_64-unknown-linux-gnu
-```
-
-For macOS, you must build on macOS hardware.
-
-#### Build Output Locations
-
-After `npm run build:desktop`, packages are created in:
-```
-src-tauri/target/release/bundle/
-├── appimage/         # Linux .AppImage
-├── deb/              # Linux .deb
-├── msi/              # Windows .msi
-├── nsis/             # Windows .exe installer
-└── dmg/              # macOS .dmg
-```
-
-### Desktop App Features
-- **Zero authentication** — runs as a local single-user app
-- **Native file dialogs** — OS file pickers for importing models
-- **Local storage** — `~/.local/share/slag3d` (Linux), `%APPDATA%\slag3d` (Windows), `~/Library/Application Support/slag3d` (macOS)
-- **WebGL thumbnails** — rendered client-side, no Puppeteer needed
-- **Custom protocol** — `slag3d-asset://` for fast local file streaming
-
----
-
-## Deployment
-
-### Proxmox LXC (Recommended for Web Server)
-```bash
-curl -fsSL https://raw.githubusercontent.com/slag3d/slag3d/main/scripts/install-lxc.sh | bash
-systemctl status slag3d.service
-```
-
-The installer generates a random admin password, stores it in `/opt/slag3D/.env`
-and prints it at the end. It also verifies that the printed credentials really
-work and re-syncs the admin account if the database contains an older password.
-
----
-
-## Default Admin Credentials
-
-| Username | Password | Role | Notes |
-|----------|----------|------|-------|
-| `admin` | `admin123` | Administrator | **Dev mode only** — change after first login |
-| `admin` | random | Administrator | LXC installer — see `/opt/slag3D/.env` (`ADMIN_PASSWORD`) |
-
-Change default password via: Settings → Change Password (top navigation)
-
-### Resetting the admin password (server console)
+### Install and run
 
 ```bash
-cd /opt/slag3D
-npm run set-admin -- 'YourNewStrongPassword'   # one-off password
-npm run set-admin                               # uses ADMIN_USER / ADMIN_PASSWORD from .env
+npm ci
 ```
 
-The command updates the `admin` account in the database directly, so it also
-works when the current password is unknown or the account was soft-deleted.
+`npm run tauri dev` does **not** start Vite (there is no `beforeDevCommand`, and `devUrl` is `http://localhost:3000`). Run the two processes in separate terminals:
+
+```bash
+npx vite --port 3000     # frontend
+npm run tauri dev        # native window
+```
+
+### Verification
+
+```bash
+npm run build:client                 # frontend build (dist/)
+npx tsc --noEmit                     # TypeScript check
+cd src-tauri && cargo check && cargo test
+```
 
 ---
 
-## Security Guidelines
+## Building releases
 
-- Always set `JWT_SECRET` in production (min 32 characters)
-- Never commit `.env` files to Git
-- Rotate secrets every 90 days
-- Use HTTPS/HSTS for public access
-- See [SECURITY_GUIDE.md](./SECURITY_GUIDE.md) for full implementation
+| Command | Result |
+|---------|--------|
+| `npm run build:client` | Frontend only, into `dist/` |
+| `npm run tauri build` | Native bundle for the current target (used by CI) |
+| `npm run build:desktop` | `sync-version` (from the latest `v*` git tag) then `tauri build` — this rewrites committed version files |
 
----
+`build:desktop` derives the version from Git tags, so it leaves `package.json` and `tauri.conf.json` modified. Use `npm run tauri build` when you don't want that side effect.
 
-## Support
+| Platform | Bundle |
+|----------|--------|
+| Linux | AppImage (`.AppImage`) |
+| Windows | NSIS installer (`.exe`) |
+| macOS | Universal DMG (`.dmg`) |
 
-- Issues: Open GitHub issues for bugs/features
-- Documentation: See related guides below
-
----
-
-## Related Documentation
-
-- [AGENTS.md](./AGENTS.md) — Developer quick reference
-- [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md) — Database migrations
-- [SECURITY_GUIDE.md](./SECURITY_GUIDE.md) — Security implementation
-- [Tauri Conversion Design](./docs/superpowers/specs/2026-11-09-tauri-conversion-design.md) — Desktop app architecture
+Bundles land in `src-tauri/target/<target>/release/bundle/`. macOS must be built on macOS; the CI release workflow (`.github/workflows/release.yml`) builds all three platforms plus `production.tar.gz` on `v*` tags.
 
 ---
 
-**Version**: 4 (Soft delete active)
-**Last Updated**: Nov 2026
+## Local storage
+
+The app data directory is the OS application-data path (e.g. `~/.local/share/slag3d`, `%APPDATA%\slag3d`, `~/Library/Application Support/slag3d`). It can be overridden with `SLAG3D_APP_DATA_DIR`.
+
+```
+<app-data>/
+├── vault.db                 SQLite database (schema v6)
+├── uploads/
+│   ├── models/<id>/         imported model files
+│   ├── thumbnails/<id>.png  generated thumbnails
+│   └── tmp/                 transient extraction files (not backed up)
+└── .backup-work/            backup export/import scratch space
+```
+
+Migrations run on every startup in `src-tauri/src/db/schema.rs`. Schema v6 hard-deletes models; legacy `is_deleted` / `deleted_at` columns from the old web-server schema are dropped automatically. See [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md).
+
+---
+
+## Backup & restore
+
+Use the **Backup** button in the top navigation:
+
+- **Create backup** writes a ZIP containing `manifest.json`, a consistent `vault.db` snapshot (`VACUUM INTO`) and `uploads/`. The destination is written via a temporary file and renamed into place, so a failed export cannot truncate an existing backup.
+- **Import backup** validates the archive and database, then replaces the current vault. This is a **replace, not a merge** — confirm before restoring. The DB is copied into the live connection with SQLite's online backup API and the uploads tree is swapped; if any step fails, both halves are rolled back.
+
+---
+
+## Documentation
+
+- [AGENTS.md](./AGENTS.md) — developer notes and gotchas
+- [SECURITY_GUIDE.md](./SECURITY_GUIDE.md) — current security model
+- [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md) — database schema and migrations
+- [AUDIT_REPORT.md](./AUDIT_REPORT.md) — historical audit snapshot (not current)
+- `docs/superpowers/` — original conversion plan/spec (historical)

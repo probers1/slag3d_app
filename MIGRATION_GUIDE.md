@@ -1,86 +1,48 @@
-# Database Migration System
+# Database schema & migrations
 
-## Overview
-Versioned schema management ensuring safe database upgrades across environments.
+SLAG3D keeps a single SQLite database, `vault.db`, in the OS application-data directory. The current schema version is **v6**.
 
-## Current Version: 4
+## How migrations run
 
-| Version | Description | Tables Added |
-|---------|-------------|--------------|
-| v1 | Initial schema | users, models, files, tags, model_tags, favorites, collections, collection_models, auth_tokens (9 total) |
-| v2 | Metadata enhancement | width/height columns on models and files |
-| v3 | Soft delete for users | soft_delete flag |
+`init_schema()` in `src-tauri/src/db/schema.rs` runs on every startup, before any command can access the DB:
 
-## Schema Tracking Table
+1. Pragmas are applied (`journal_mode=WAL`, `foreign_keys=ON`).
+2. `schema_versions` and all tables/indexes are created with `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`.
+3. The single local user (`00000000-0000-0000-0000-000000000000`) is inserted if missing.
+4. Legacy soft-delete columns are removed from `models`, `files`, `collections` and `users`.
+5. `schema_versions` is upserted to version 6.
 
-```sql
-schema_versions (id INTEGER PRIMARY KEY CHECK(id=1), version INT UNIQUE, applied_at DATETIME)
-```
+Migrations are idempotent: running them against an already-current vault is a no-op.
 
-## Automatic Migration Flow
+## Version history
 
-On startup, the system:
-1. Queries `schema_versions` for current version
-2. Executes pending migrations in order (001_prefix.ts → 004_prefix.ts)
-3. Records timestamp of each applied migration
+| Version | Change |
+|---------|--------|
+| v1–v4 | From the retired Express server: base tables, metadata columns, soft-delete flags for users |
+| v5 | Tauri conversion: simplified schema for a single local user, no auth tables |
+| **v6** | Hard deletes: `is_deleted` / `deleted_at` dropped from all tables; legacy v4/v5 vaults are upgraded on open |
 
-## File Convention
+There is no soft-delete path in the desktop app — `delete_model` removes the metadata and the files on disk.
 
-Migration files in `server/migrations/`:
-```
-001_initial_schema.ts     -- Creates all base tables
-002_add_metadata_columns.ts  -- Adds width/height columns  
-003_...                     -- Soft delete preparation (skipped)
-004_add_soft_delete_flag_for_users.ts  -- Implements soft delete for users
-```
+## Opening an older vault
 
-**Naming**: Prefixed with zero-padded version number. **Export**: Must return `{ version: number; timestamp: string }`.
+Copy an older `vault.db` into the app data directory (or restore an older backup) and start the app. `init_schema()` upgrades it in place. Nothing needs to be edited by hand.
 
-## Adding Migrations
+`import_backup` reads the schema version and model count from the backed-up **database** and rejects an archive whose `manifest.json` disagrees with them. A backup made by a newer schema is rejected instead of being partially restored; update the app first.
 
-1. Create file: `server/migrations/005_new_feature.ts`
-2. Export function:
-```typescript
-export function v5_new_feature(db: Database): { version: number; timestamp: string } {
-  // Apply schema changes
-  db.exec(`ALTER TABLE ...`)
-  return { version: 5, timestamp: new Date().toISOString() };
-}
-```
-3. Update `server/db.ts`: `export const SCHEMA_VERSION = 6;`
+## Changing the schema
 
-## Verification Commands
+Edit `src-tauri/src/db/schema.rs`:
+
+- Add idempotent `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE` / `DROP COLUMN` statements to `init_schema()`.
+- Bump the version written in the final `INSERT ... ON CONFLICT DO UPDATE` statement.
+- Use `drop_soft_delete_columns`-style guards for columns that may not exist on older vaults.
+- Add a test in `src-tauri/src/db/` for the upgrade path and run `cargo test`.
+
+## Verification
 
 ```bash
-# Check applied migrations
-sqlite3 data/vault.db "SELECT * FROM schema_versions;"
-
-# Expected output:
-# id  version  applied_at
-# 1   4
+cd src-tauri && cargo test
+sqlite3 <app-data>/vault.db "SELECT * FROM schema_versions;"
+# expected: 1|6|<timestamp>
 ```
-
-## Rollback Procedure
-
-⚠️ Warning: Resetting requires re-running all migrations.
-
-```bash
-# Backup first
-cp data/vault.db data/vault.db.backup
-
-# Reset version tracking
-sqlite3 data/vault.db "DELETE FROM schema_versions;"
-
-# Restart app - migrations will re-apply on startup
-```
-
-## Schema Versions History
-
-| Version | Description | Date |
-|---------|-------------|------|
-| v1 | Base tables (users, models, files, etc.) | Initial |
-| v2 | Metadata columns on models/files | 2026 |
-| v4 | Soft delete flag for users | Oct 2026 |
-
----
-**Last Updated**: Nov 2026 — Version 4 active

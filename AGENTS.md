@@ -4,8 +4,8 @@ Tauri v2 desktop app: React 19 + Vite (`src/`) and Rust (`src-tauri/`), single l
 
 ## Read the right sources
 
-- `README.md`, `AUDIT_REPORT.md`, `MIGRATION_GUIDE.md` and `docs/superpowers/*` describe the **retired Express/Puppeteer web server** (`npm run dev/start`, JWT, soft deletes, schema v4, Puppeteer thumbnails). Those scripts and deps do not exist. Trust `package.json`, `src-tauri/tauri.conf.json`, and the code instead. README's native prerequisite packages are still valid.
-- Current DB schema is **v6** (hard deletes; legacy `is_deleted`/`deleted_at` dropped on startup), not README's v4.
+- `README.md`, `MIGRATION_GUIDE.md` and `SECURITY_GUIDE.md` describe the **current Tauri app**. `AUDIT_REPORT.md` and `docs/superpowers/*` are explicitly marked historical (old conversion audit/plan/spec) — don't follow their checklists or schema notes. As always, `package.json`, `src-tauri/tauri.conf.json` and the code win if docs and code disagree.
+- Current DB schema is **v6** (hard deletes; legacy `is_deleted`/`deleted_at` dropped on startup).
 
 ## Commands
 

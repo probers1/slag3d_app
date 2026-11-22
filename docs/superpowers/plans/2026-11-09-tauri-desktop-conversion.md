@@ -1,6 +1,6 @@
 # SLAG3D Tauri v2 Desktop Conversion Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical plan — do not execute.** This is the original conversion implementation plan, kept for context after the migration completed. Checkboxes and workflow instructions below are stale, and details have since changed (schema v6 with hard deletes, client-side thumbnails via a render queue, AppImage/NSIS/DMG bundles only, full-vault backup/restore). For current behaviour use [README.md](../../../README.md), [AGENTS.md](../../../AGENTS.md) and [SECURITY_GUIDE.md](../../../SECURITY_GUIDE.md).
 
 **Goal:** Convert SLAG3D into a standalone, cross-platform Tauri v2 desktop app (Linux, Windows, macOS) with 100% core asset management functionality preserved and authentication removed.
 
