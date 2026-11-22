@@ -39,14 +39,26 @@ pub async fn import_backup(app: AppHandle, archive_path: String) -> Result<Backu
     let work = get_backup_work_dir().join(format!("import-{}", Uuid::new_v4()));
 
     let manifest = extract_backup_archive(&archive, &work).map_err(|e| e.to_string())?;
-    validate_backup_db(&work.join(DB_NAME)).map_err(|e| e.to_string())?;
+    let (db_schema_version, db_model_count) =
+        validate_backup_db(&work.join(DB_NAME)).map_err(|e| e.to_string())?;
+
+    // manifest.json is untrusted metadata: a crafted or stale backup can claim
+    // any version or model count. The DB snapshot is the source of truth, and
+    // a mismatch means the archive was tampered with or written incorrectly.
+    if manifest.schema_version != db_schema_version || manifest.model_count != db_model_count {
+        let _ = fs::remove_dir_all(&work);
+        return Err(format!(
+            "Backup manifest does not match its database (schema v{}/v{}, {} / {} models)",
+            manifest.schema_version, db_schema_version, manifest.model_count, db_model_count
+        ));
+    }
 
     let mut conn = get_db_connection(&app)?;
-    if manifest.schema_version > schema_version(&conn) {
+    if db_schema_version > schema_version(&conn) {
         let _ = fs::remove_dir_all(&work);
         return Err(format!(
             "Backup needs a newer SLAG3D version (schema v{}); update the app first.",
-            manifest.schema_version
+            db_schema_version
         ));
     }
     let rollback_db = work.join("pre-restore.db");
@@ -88,6 +100,6 @@ pub async fn import_backup(app: AppHandle, archive_path: String) -> Result<Backu
         path: archive_path,
         size: fs::metadata(&archive).map_err(|e| e.to_string())?.len(),
         created_at: manifest.created_at,
-        model_count: manifest.model_count,
+        model_count: db_model_count,
     })
 }

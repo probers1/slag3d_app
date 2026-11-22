@@ -1,5 +1,6 @@
-use std::path::Path;
+use std::ffi::OsString;
 use std::fs;
+use std::path::{Component, Path};
 
 /// Resolve a user-supplied path (which may be a `slag3d-asset://` URI, a
 /// Windows `http://slag3d-asset.localhost/` URI, or a bare `/uploads/...`
@@ -73,15 +74,44 @@ pub fn resolve_upload_relative_path(
     Ok(canonical_file)
 }
 
-/// Compare two paths for prefix containment, normalizing Windows \\?\ long-path
-/// prefixes so a canonicalized existing directory and a plain file path
-/// compare correctly.
-fn path_starts_with(path: &Path, base: &Path) -> bool {
-    let p = path.to_string_lossy();
-    let p = p.strip_prefix(r"\\?\").unwrap_or(&p);
-    let b = base.to_string_lossy();
-    let b = b.strip_prefix(r"\\?\").unwrap_or(&b);
-    p.replace('\\', "/").starts_with(&b.replace('\\', "/"))
+/// Compare two paths for prefix containment **by path component**, not by raw
+/// string prefix. A string check would treat `/vault/uploads-old` as contained
+/// in `/vault/uploads`. Windows `\\?\` long-path prefixes and mixed separators
+/// are normalized first. ParentDir components are rejected outright.
+pub fn path_starts_with(path: &Path, base: &Path) -> bool {
+    fn parts(path: &Path) -> Option<Vec<OsString>> {
+        let text = path.to_string_lossy();
+        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+        let mut out = Vec::new();
+        for component in Path::new(text.replace('\\', "/").as_str()).components() {
+            match component {
+                Component::Normal(part) => out.push(part.to_os_string()),
+                Component::ParentDir => return None,
+                Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
+            }
+        }
+        Some(out)
+    }
+
+    match (parts(path), parts(base)) {
+        (Some(path), Some(base)) => {
+            path.len() >= base.len() && path.iter().zip(base.iter()).all(|(p, b)| p == b)
+        }
+        _ => false,
+    }
+}
+
+/// Validate an ID before using it as a filesystem path component (model IDs in
+/// `uploads/models/<id>` and `uploads/thumbnails/<id>.png`). All IDs are
+/// generated as UUIDs, but they arrive over IPC and may come from an imported
+/// backup, so reject anything that could act as a separator or traversal
+/// component rather than trusting the caller.
+pub fn is_safe_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 #[cfg(test)]
@@ -190,6 +220,25 @@ mod tests {
         assert!(err.is_err());
 
         let _ = fs::remove_dir_all("/tmp/slag3d_path_test2");
+    }
+
+    #[test]
+    fn test_path_starts_with_uses_component_boundaries() {
+        let base = Path::new("/vault/uploads");
+        assert!(path_starts_with(&base.join("models/m1/part.stl"), base));
+        assert!(!path_starts_with(Path::new("/vault/uploads-old/part.stl"), base));
+        assert!(!path_starts_with(&base.join("../vault.db"), base));
+    }
+
+    #[test]
+    fn test_is_safe_id_rejects_path_components() {
+        assert!(is_safe_id("2b3c4d5e-6f70-4800-9000-123456789abc"));
+        assert!(!is_safe_id(".."));
+        assert!(!is_safe_id("../vault.db"));
+        assert!(!is_safe_id("a/b"));
+        assert!(!is_safe_id("a\\b"));
+        assert!(!is_safe_id("id.png"));
+        assert!(!is_safe_id(""));
     }
 
     #[test]

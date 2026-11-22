@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::fs;
+use crate::services::path_util::path_starts_with;
 use crate::services::storage::{is_allowed_extension, ExtractedFile, get_model_dir, get_unique_filename};
 
 #[derive(Debug)]
@@ -82,7 +83,12 @@ pub fn is_safe_path(base: &Path, path: &Path) -> bool {
                     None => return false,
                 }
             }
-            let mut canonical = ancestor.canonicalize().unwrap_or_else(|_| base_canonical.clone());
+            // Never silently fall back to the base: that would make an
+            // uncanonicalizable path look contained and bypass the check.
+            let mut canonical = match ancestor.canonicalize() {
+                Ok(p) => p,
+                Err(_) => return false,
+            };
             for component in tail.iter().rev() {
                 canonical.push(component);
             }
@@ -90,20 +96,9 @@ pub fn is_safe_path(base: &Path, path: &Path) -> bool {
         }
     };
 
-    // Containment check on canonical forms (handles Windows \\?\ prefixes and
-    // mixed separators via the helper below).
+    // Component-wise containment on canonical forms handles Windows \\?\
+    // prefixes, mixed separators and sibling-directory prefix trickery.
     path_starts_with(&path_canonical, &base_canonical)
-}
-
-/// Compare two paths for prefix containment, normalizing Windows \\?\ long-path
-/// prefixes so a canonicalized existing directory and a plain file path
-/// compare correctly.
-fn path_starts_with(path: &Path, base: &Path) -> bool {
-    let p = path.to_string_lossy();
-    let p = p.strip_prefix(r"\\?\").unwrap_or(&p);
-    let b = base.to_string_lossy();
-    let b = b.strip_prefix(r"\\?\").unwrap_or(&b);
-    p.replace('\\', "/").starts_with(&b.replace('\\', "/"))
 }
 
 pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFile>, ArchiveError> {

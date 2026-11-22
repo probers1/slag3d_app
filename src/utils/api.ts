@@ -235,10 +235,16 @@ export async function fetchFileAsBlobUrl(path: string): Promise<string> {
     throw new Error(`Unexpected read_file response type: ${typeof data}`);
   }
 
+  // Copy into a plain ArrayBuffer: Uint8Array<ArrayBufferLike> is not assignable
+  // to BlobPart when its buffer may be a SharedArrayBuffer under the current
+  // TypeScript DOM types.
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+
   // The native WebView PDF viewer only engages when the blob advertises the
   // PDF MIME type. Other files (3D models) keep the default octet-stream type.
   const mimeType = path.toLowerCase().endsWith('.pdf') ? 'application/pdf' : undefined;
-  return URL.createObjectURL(new Blob([bytes], mimeType ? { type: mimeType } : undefined));
+  return URL.createObjectURL(new Blob([buffer], mimeType ? { type: mimeType } : undefined));
 }
 
 export async function apiFetch(url: string, options: RequestInit = {}) {

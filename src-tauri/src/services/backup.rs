@@ -178,39 +178,57 @@ pub fn write_backup_archive(
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
     }
-    let file = File::create(destination)?;
-    let mut zip = ZipWriter::new(file);
-    let options = FileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
-        .compression_level(Some(6));
 
-    zip.start_file(DB_NAME, options)?;
-    zip.write_all(&fs::read(&snapshot)?)?;
+    // Never truncate the destination before the archive is complete: an I/O
+    // error mid-compression would otherwise destroy the last good backup.
+    // Write to a sibling temp file and rename it into place on success.
+    let file_name = destination.file_name().unwrap_or_default().to_string_lossy();
+    let temp = destination.with_file_name(format!("{}.tmp-{}", file_name, Uuid::new_v4()));
+    let write_result: Result<BackupInfo, BackupError> = (|| {
+        let file = File::create(&temp)?;
+        let mut zip = ZipWriter::new(file);
+        let options = FileOptions::default()
+            .compression_method(CompressionMethod::Deflated)
+            .compression_level(Some(6));
 
-    zip.start_file(MANIFEST_NAME, options)?;
-    zip.write_all(&serde_json::to_vec_pretty(&manifest)?)?;
-    // Keep the folder in the archive even when the vault has no files yet.
-    zip.add_directory("uploads/", options)?;
+        zip.start_file(DB_NAME, options)?;
+        zip.write_all(&fs::read(&snapshot)?)?;
 
-    if uploads_dir.is_dir() {
-        let mut files = Vec::new();
-        collect_upload_files(uploads_dir, Path::new(""), &mut files)?;
-        for (rel, path) in files {
-            zip.start_file(format!("uploads/{}", rel), options)?;
-            let mut input = File::open(&path)?;
-            io::copy(&mut input, &mut zip)?;
+        zip.start_file(MANIFEST_NAME, options)?;
+        zip.write_all(&serde_json::to_vec_pretty(&manifest)?)?;
+        // Keep the folder in the archive even when the vault has no files yet.
+        zip.add_directory("uploads/", options)?;
+
+        if uploads_dir.is_dir() {
+            let mut files = Vec::new();
+            collect_upload_files(uploads_dir, Path::new(""), &mut files)?;
+            for (rel, path) in files {
+                zip.start_file(format!("uploads/{}", rel), options)?;
+                let mut input = File::open(&path)?;
+                io::copy(&mut input, &mut zip)?;
+            }
         }
-    }
 
-    zip.finish()?;
+        let file = zip.finish()?;
+        file.sync_all()?;
+
+        Ok(BackupInfo {
+            path: destination.to_string_lossy().into_owned(),
+            size: fs::metadata(&temp)?.len(),
+            created_at: manifest.created_at,
+            model_count: manifest.model_count,
+        })
+    })();
+
+    let result = match write_result {
+        Ok(info) => fs::rename(&temp, destination).map(|_| info).map_err(BackupError::Io),
+        Err(e) => Err(e),
+    };
     let _ = fs::remove_file(&snapshot);
-
-    Ok(BackupInfo {
-        path: destination.to_string_lossy().into_owned(),
-        size: fs::metadata(destination)?.len(),
-        created_at: manifest.created_at,
-        model_count: manifest.model_count,
-    })
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
 }
 
 /// Accept only relative, normal path components inside the ZIP. Backslashes,
@@ -451,6 +469,36 @@ mod tests {
         assert!(extracted.join("uploads").is_dir());
         let _ = replace_uploads_dir(&root, &extracted.join("uploads")).unwrap();
         assert!(root.join("uploads").is_dir());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn failed_rename_cleans_up_temp_archive() {
+        let root = temp_dir("dest-rename");
+        let conn = make_db(&root.join("vault.db"));
+        // A directory at the destination makes the final rename fail after
+        // the archive has already been written.
+        let destination = root.join("backup.zip");
+        fs::create_dir_all(&destination).unwrap();
+
+        let err = write_backup_archive(
+            &conn,
+            &root.join("no-uploads-here"),
+            &root.join("work"),
+            &destination,
+            "test",
+        )
+        .unwrap_err();
+        assert!(matches!(err, BackupError::Io(_)));
+        assert!(destination.is_dir());
+        assert!(
+            fs::read_dir(&root)
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .all(|e| !e.file_name().to_string_lossy().contains(".tmp-")),
+            "temporary archive should be removed on failure"
+        );
+
         fs::remove_dir_all(&root).unwrap();
     }
 

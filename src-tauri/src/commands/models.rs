@@ -3,10 +3,11 @@ use crate::commands::{
 };
 use crate::db::schema::DEFAULT_USER_ID;
 use crate::services::archive::{extract_7z, extract_zip};
-use crate::services::path_util::resolve_upload_relative_path;
+use crate::services::path_util::{is_safe_id, resolve_upload_relative_path};
 use crate::services::storage::{ExtractedFile, get_unique_filename, is_3d_file};
 use base64::{engine::general_purpose, Engine as _};
 use rusqlite::OptionalExtension;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
@@ -247,53 +248,67 @@ pub async fn import_models(
     let models_dir = app_data_dir.join("uploads").join("models").join(&model_id);
     fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
 
-    let mut all_extracted_files = Vec::new();
+    // Any failure before the DB commit must not leave a model directory with
+    // no metadata row pointing at it. Extract first, then commit all rows in
+    // one transaction; on either failure remove the directory we created.
+    let extracted_result: Result<Vec<ExtractedFile>, String> = (|| {
+        let mut all_extracted_files = Vec::new();
+        for file_path_str in &file_paths {
+            let path = Path::new(file_path_str);
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
 
-    for file_path_str in &file_paths {
-        let path = Path::new(file_path_str);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let extracted = match ext.as_str() {
+                "zip" => {
+                    extract_zip(path, &model_id)
+                        .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?
+                },
+                "7z" => {
+                    extract_7z(path, &model_id)
+                        .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?
+                },
+                _ => {
+                    // Single file - copy to model dir
+                    let raw_filename = match path.file_name() {
+                        Some(name) => name.to_string_lossy().to_string(),
+                        None => continue,
+                    };
+                    let (filename, dest_path) = get_unique_filename(&models_dir, &raw_filename);
+                    fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
+                    let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
+                    vec![ExtractedFile {
+                        filename,
+                        destination_path: dest_path,
+                        size,
+                    }]
+                }
+            };
 
-        let extracted = match ext.as_str() {
-            "zip" => {
-                extract_zip(path, &model_id)
-                    .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?
-            },
-            "7z" => {
-                extract_7z(path, &model_id)
-                    .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?
-            },
-            _ => {
-                // Single file - copy to model dir
-                let raw_filename = match path.file_name() {
-                    Some(name) => name.to_string_lossy().to_string(),
-                    None => continue,
-                };
-                let (filename, dest_path) = get_unique_filename(&models_dir, &raw_filename);
-                fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
-                let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
-                vec![ExtractedFile {
-                    filename,
-                    destination_path: dest_path,
-                    size,
-                }]
-            }
-        };
+            all_extracted_files.extend(extracted);
+        }
 
-        all_extracted_files.extend(extracted);
-    }
+        if !all_extracted_files.iter().any(|f| is_3d_file(&f.filename)) {
+            return Err("No 3D files found. PDFs can only be attached to a model with a 3D file.".to_string());
+        }
+        Ok(all_extracted_files)
+    })();
 
-    if !all_extracted_files.iter().any(|f| is_3d_file(&f.filename)) {
-        return Err("No 3D files found. PDFs can only be attached to a model with a 3D file.".to_string());
-    }
+    let all_extracted_files = match extracted_result {
+        Ok(files) => files,
+        Err(e) => {
+            let _ = fs::remove_dir_all(&models_dir);
+            return Err(e);
+        }
+    };
 
     // Insert model
     let model_title = title.unwrap_or_else(|| "Untitled Model".to_string());
     let model_description = description.unwrap_or_default();
 
-    {
-        let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+    let db_result: Result<(), String> = (|| {
+        let mut conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-        conn.execute(
+        tx.execute(
             "INSERT INTO models (id, user_id, title, description, thumbnail_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
             rusqlite::params![&model_id, &user_id, &model_title, &model_description, &now, &now],
         ).map_err(|e| e.to_string())?;
@@ -306,7 +321,7 @@ pub async fn import_models(
             let is_primary = if Some(idx) == primary_3d_index { 1 } else { 0 };
             let public_path = format!("/uploads/models/{}/{}", model_id, file.filename);
 
-            conn.execute(
+            tx.execute(
                 "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path, is_primary_3d) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 rusqlite::params![
                     &file_id, &model_id, &file.filename, &file.filename,
@@ -319,18 +334,18 @@ pub async fn import_models(
         if let Some(tag_string) = tags {
             for tag_name in tag_string.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
                 let new_tag_id = Uuid::new_v4().to_string();
-                conn.execute(
+                tx.execute(
                     "INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)",
                     rusqlite::params![&new_tag_id, tag_name],
                 ).map_err(|e| e.to_string())?;
 
-                let tag_id: String = conn.query_row(
+                let tag_id: String = tx.query_row(
                     "SELECT id FROM tags WHERE name = ?",
                     rusqlite::params![tag_name],
                     |row| row.get(0),
                 ).map_err(|e| e.to_string())?;
 
-                conn.execute(
+                tx.execute(
                     "INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?, ?)",
                     rusqlite::params![&model_id, &tag_id],
                 ).map_err(|e| e.to_string())?;
@@ -339,11 +354,18 @@ pub async fn import_models(
 
         // Add to collection if provided
         if let Some(cid) = collection_id {
-            conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO collection_models (collection_id, model_id) VALUES (?, ?)",
                 rusqlite::params![&cid, &model_id],
             ).map_err(|e| e.to_string())?;
         }
+
+        tx.commit().map_err(|e| e.to_string())
+    })();
+
+    if let Err(e) = db_result {
+        let _ = fs::remove_dir_all(&models_dir);
+        return Err(e);
     }
 
     get_model_detail(app, model_id).await
@@ -358,28 +380,32 @@ pub async fn update_model(
     tags: Option<String>,
     primary_file_id: Option<String>,
 ) -> Result<(), String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+    let mut conn = get_db_connection(&app).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
 
+    // Title, tags and primary file must succeed or fail together. Previously a
+    // tag failure left the title changed and the model with no tags at all.
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
     if let Some(t) = title {
-        conn.execute("UPDATE models SET title = ?, updated_at = ? WHERE id = ?", rusqlite::params![&t, &now, &id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE models SET title = ?, updated_at = ? WHERE id = ?", rusqlite::params![&t, &now, &id]).map_err(|e| e.to_string())?;
     }
     if let Some(d) = description {
-        conn.execute("UPDATE models SET description = ?, updated_at = ? WHERE id = ?", rusqlite::params![&d, &now, &id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE models SET description = ?, updated_at = ? WHERE id = ?", rusqlite::params![&d, &now, &id]).map_err(|e| e.to_string())?;
     }
 
     if let Some(tag_string) = tags {
-        conn.execute("DELETE FROM model_tags WHERE model_id = ?", rusqlite::params![&id]).map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM model_tags WHERE model_id = ?", rusqlite::params![&id]).map_err(|e| e.to_string())?;
         for tag_name in tag_string.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
             let new_tag_id = Uuid::new_v4().to_string();
-            conn.execute("INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)", rusqlite::params![&new_tag_id, tag_name]).map_err(|e| e.to_string())?;
-            let tag_id: String = conn.query_row("SELECT id FROM tags WHERE name = ?", rusqlite::params![tag_name], |row| row.get(0)).map_err(|e| e.to_string())?;
-            conn.execute("INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?, ?)", rusqlite::params![&id, &tag_id]).map_err(|e| e.to_string())?;
+            tx.execute("INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)", rusqlite::params![&new_tag_id, tag_name]).map_err(|e| e.to_string())?;
+            let tag_id: String = tx.query_row("SELECT id FROM tags WHERE name = ?", rusqlite::params![tag_name], |row| row.get(0)).map_err(|e| e.to_string())?;
+            tx.execute("INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?, ?)", rusqlite::params![&id, &tag_id]).map_err(|e| e.to_string())?;
         }
     }
 
     if let Some(pfid) = primary_file_id {
-        let filename: Option<String> = conn
+        let filename: Option<String> = tx
             .prepare("SELECT filename FROM files WHERE id = ? AND model_id = ?")
             .map_err(|e| e.to_string())?
             .query_row(rusqlite::params![&pfid, &id], |row| row.get(0))
@@ -388,11 +414,11 @@ pub async fn update_model(
         if !filename.as_deref().is_some_and(is_3d_file) {
             return Err("Only 3D files can be set as primary".to_string());
         }
-        conn.execute("UPDATE files SET is_primary_3d = 0 WHERE model_id = ?", rusqlite::params![&id]).map_err(|e| e.to_string())?;
-        conn.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ? AND model_id = ?", rusqlite::params![&pfid, &id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE files SET is_primary_3d = 0 WHERE model_id = ?", rusqlite::params![&id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ? AND model_id = ?", rusqlite::params![&pfid, &id]).map_err(|e| e.to_string())?;
     }
 
-    Ok(())
+    tx.commit().map_err(|e| e.to_string())
 }
 
 /// Add supplementary files to an existing model. Mirrors the web server's
@@ -404,93 +430,139 @@ pub async fn add_model_files(
     model_id: String,
     file_paths: Vec<String>,
 ) -> Result<Vec<ModelFile>, String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+    if !is_safe_id(&model_id) {
+        return Err("Invalid model ID".to_string());
+    }
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::env::set_var("SLAG3D_APP_DATA_DIR", &app_data_dir);
     let models_dir = app_data_dir.join("uploads").join("models").join(&model_id);
     fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
 
-    let mut all_extracted: Vec<ExtractedFile> = Vec::new();
-    for file_path_str in &file_paths {
-        let path = Path::new(file_path_str);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-        let extracted = match ext.as_str() {
-            "zip" => extract_zip(path, &model_id)
-                .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?,
-            "7z" => extract_7z(path, &model_id)
-                .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?,
-            _ => {
-                let raw_filename = match path.file_name() {
-                    Some(name) => name.to_string_lossy().to_string(),
-                    None => continue,
-                };
-                let (filename, dest_path) = get_unique_filename(&models_dir, &raw_filename);
-                fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
-                let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
-                vec![ExtractedFile {
-                    filename,
-                    destination_path: dest_path,
-                    size,
-                }]
-            }
-        };
-        all_extracted.extend(extracted);
-    }
-
-    if all_extracted.is_empty() {
-        return Err("No valid 3D files found in archives".to_string());
-    }
-
-    let mut inserted: Vec<ModelFile> = Vec::new();
-    for file in &all_extracted {
-        let file_id = Uuid::new_v4().to_string();
-        let mime_type = mime_guess::from_path(&file.destination_path).first_or_octet_stream().to_string();
-        let public_path = format!("/uploads/models/{}/{}", model_id, file.filename);
-        conn.execute(
-            "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path, is_primary_3d) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            rusqlite::params![
-                &file_id, &model_id, &file.filename, &file.filename,
-                &mime_type, file.size as i64, &public_path, 0,
-            ],
-        ).map_err(|e| e.to_string())?;
-        inserted.push(ModelFile {
-            id: file_id,
-            filename: file.filename.clone(),
-            original_name: file.filename.clone(),
-            mime_type,
-            file_size: file.size,
-            file_path: public_path,
-            is_primary_3d: 0,
-        });
-    }
-
-    // Recompute primary: promote the largest new 3D file if it beats the current primary
-    let current_primary = conn
-        .prepare("SELECT id, file_size FROM files WHERE model_id = ? AND is_primary_3d = 1")
+    // Remember which files already belong to the model so a failed import
+    // can remove only the files it added, never the existing ones.
+    let existing: HashSet<_> = fs::read_dir(&models_dir)
         .map_err(|e| e.to_string())?
-        .query_row(rusqlite::params![&model_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
-        .optional()
-        .map_err(|e| e.to_string())?;
+        .filter_map(|e| e.ok().map(|e| e.file_name()))
+        .collect();
+    let cleanup_new_files = || {
+        if let Ok(entries) = fs::read_dir(&models_dir) {
+            for entry in entries.flatten() {
+                if !existing.contains(&entry.file_name()) && entry.path().is_file() {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
+    };
 
-    let largest_new = inserted
-        .iter()
-        .filter(|f| is_3d_file(&f.original_name))
-        .max_by_key(|f| f.file_size);
+    let extracted_result: Result<Vec<ExtractedFile>, String> = (|| {
+        let mut all_extracted: Vec<ExtractedFile> = Vec::new();
+        for file_path_str in &file_paths {
+            let path = Path::new(file_path_str);
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let extracted = match ext.as_str() {
+                "zip" => extract_zip(path, &model_id)
+                    .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?,
+                "7z" => extract_7z(path, &model_id)
+                    .map_err(|e| format!("Failed to extract {}: {}", file_path_str, e))?,
+                _ => {
+                    let raw_filename = match path.file_name() {
+                        Some(name) => name.to_string_lossy().to_string(),
+                        None => continue,
+                    };
+                    let (filename, dest_path) = get_unique_filename(&models_dir, &raw_filename);
+                    fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
+                    let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
+                    vec![ExtractedFile {
+                        filename,
+                        destination_path: dest_path,
+                        size,
+                    }]
+                }
+            };
+            all_extracted.extend(extracted);
+        }
+        if all_extracted.is_empty() {
+            return Err("No valid 3D files found in archives".to_string());
+        }
+        Ok(all_extracted)
+    })();
 
-    if let Some(largest) = largest_new {
-        if current_primary.map_or(true, |(_, size)| largest.file_size as u64 > size as u64) {
-            conn.execute("UPDATE files SET is_primary_3d = 0 WHERE model_id = ?", rusqlite::params![&model_id])
-                .map_err(|e| e.to_string())?;
-            conn.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ? AND model_id = ?", rusqlite::params![&largest.id, &model_id])
-                .map_err(|e| e.to_string())?;
+    let all_extracted = match extracted_result {
+        Ok(files) => files,
+        Err(e) => {
+            cleanup_new_files();
+            return Err(e);
+        }
+    };
+
+    let db_result: Result<Vec<ModelFile>, String> = (|| {
+        let mut conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+        let mut inserted: Vec<ModelFile> = Vec::new();
+        for file in &all_extracted {
+            let file_id = Uuid::new_v4().to_string();
+            let mime_type = mime_guess::from_path(&file.destination_path).first_or_octet_stream().to_string();
+            let public_path = format!("/uploads/models/{}/{}", model_id, file.filename);
+            tx.execute(
+                "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path, is_primary_3d) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                rusqlite::params![
+                    &file_id, &model_id, &file.filename, &file.filename,
+                    &mime_type, file.size as i64, &public_path, 0,
+                ],
+            ).map_err(|e| e.to_string())?;
+            inserted.push(ModelFile {
+                id: file_id,
+                filename: file.filename.clone(),
+                original_name: file.filename.clone(),
+                mime_type,
+                file_size: file.size,
+                file_path: public_path,
+                is_primary_3d: 0,
+            });
+        }
+
+        // Recompute primary: promote the largest new 3D file if it beats the
+        // current primary.
+        let current_primary = tx
+            .prepare("SELECT id, file_size FROM files WHERE model_id = ? AND is_primary_3d = 1")
+            .map_err(|e| e.to_string())?
+            .query_row(rusqlite::params![&model_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+            .optional()
+            .map_err(|e| e.to_string())?;
+
+        let largest_new = inserted
+            .iter()
+            .filter(|f| is_3d_file(&f.original_name))
+            .max_by_key(|f| f.file_size);
+
+        if let Some(largest) = largest_new {
+            if current_primary.map_or(true, |(_, size)| largest.file_size as u64 > size as u64) {
+                tx.execute("UPDATE files SET is_primary_3d = 0 WHERE model_id = ?", rusqlite::params![&model_id])
+                    .map_err(|e| e.to_string())?;
+                tx.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ? AND model_id = ?", rusqlite::params![&largest.id, &model_id])
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(inserted)
+    })();
+
+    match db_result {
+        Ok(inserted) => Ok(inserted),
+        Err(e) => {
+            cleanup_new_files();
+            Err(e)
         }
     }
-
-    Ok(inserted)
 }
 
 #[tauri::command]
 pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
+    if !is_safe_id(&id) {
+        return Err("Invalid model ID".to_string());
+    }
     // Hard delete — matches the Express server's `DELETE /api/models/:id`
     // (purge files from disk, then cascade the DB row). The spec for the
     // Tauri build also specifies "Removes DB records and deletes files from
@@ -587,10 +659,12 @@ pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String
     // Delete physical file from disk
     let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let uploads_dir = app_data_dir.join("uploads");
-    let file_path = file.0.strip_prefix("/uploads/").unwrap_or(&file.0);
-    let full_path = uploads_dir.join(file_path);
-    
-    if full_path.exists() {
+    // The path comes from the DB (and a restored backup is trusted input only
+    // after validation), so run it through the same canonical containment
+    // check as every other file access instead of a raw string prefix strip.
+    let full_path = resolve_upload_relative_path(&file.0, &uploads_dir)?;
+
+    if full_path.is_file() {
         fs::remove_file(&full_path).map_err(|e| e.to_string())?;
     }
     
@@ -703,6 +777,9 @@ pub async fn save_downloaded_file(
 
 #[tauri::command]
 pub async fn save_thumbnail(app: AppHandle, id: String, image_base64: String) -> Result<String, String> {
+    if !is_safe_id(&id) {
+        return Err("Invalid model ID".to_string());
+    }
     let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
 
     // Decode base64

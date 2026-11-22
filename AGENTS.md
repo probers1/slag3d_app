@@ -10,10 +10,10 @@ Tauri v2 desktop app: React 19 + Vite (`src/`) and Rust (`src-tauri/`), single l
 ## Commands
 
 - `npm run build:client` → `dist/` (`npm run build` is an alias). This is the only frontend verification script: no lint, typecheck, or test script exists for `src/`.
-- `cd src-tauri && cargo check` and `cargo test` (14 unit tests: migrations, extension allowlist, path traversal, backup round-trip). Run both after Rust changes.
+- `cd src-tauri && cargo check` and `cargo test` (19 unit tests: migrations, extension allowlist, path traversal, archive/backup round-trips, rollback). Run both after Rust changes.
 - `npm run tauri dev` does **not** start Vite: `tauri.conf.json` has no `beforeDevCommand`, and `devUrl` is `http://localhost:3000` while Vite defaults to 5173. Start Vite on port 3000 (`npx vite --port 3000`) alongside it, or deliberately change the config.
 - `npm run build:desktop` = `sync-version && tauri build`. `scripts/sync-version.js` rewrites committed `package.json` and `tauri.conf.json` versions from the latest `v*` git tag (not `Cargo.toml`), so expect dirty files afterward. CI runs `npm run tauri build` directly, using committed versions.
-- Bundle targets are only `appimage` and `nsis` in `tauri.conf.json`; README's `.deb`/`.msi`/`.dmg` claims are aspirational. Output: `src-tauri/target/release/bundle/`.
+- Bundle targets in `tauri.conf.json` are `appimage`, `nsis`, `dmg` (each used only on its own platform); `.deb`/`.msi` are not built. CI builds a universal macOS DMG (`npm run tauri build -- --target universal-apple-darwin`). Output: `src-tauri/target/<target>/release/bundle/`.
 
 ## Architecture that affects edits
 
