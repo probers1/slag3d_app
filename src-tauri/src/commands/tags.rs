@@ -1,10 +1,11 @@
 use crate::commands::TagItem;
+use crate::errors::AppError;
 use crate::db::get_db_connection;
 use tauri::AppHandle;
 
 #[tauri::command]
-pub async fn get_tags(app: AppHandle) -> Result<Vec<TagItem>, String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+pub async fn get_tags(app: AppHandle) -> Result<Vec<TagItem>, AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
 
     let mut stmt = conn.prepare(
         r#"
@@ -14,7 +15,7 @@ pub async fn get_tags(app: AppHandle) -> Result<Vec<TagItem>, String> {
         GROUP BY t.id, t.name
         ORDER BY count DESC, t.name
         "#,
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
 
     let rows = stmt.query_map([], |row| {
         Ok(TagItem {
@@ -22,11 +23,11 @@ pub async fn get_tags(app: AppHandle) -> Result<Vec<TagItem>, String> {
             name: row.get(1)?,
             count: row.get(2)?,
         })
-    }).map_err(|e| e.to_string())?;
+    }).map_err(|e| AppError::from(e.to_string()))?;
 
     let mut tags = Vec::new();
     for row in rows {
-        tags.push(row.map_err(|e| e.to_string())?);
+        tags.push(row.map_err(|e| AppError::from(e.to_string()))?);
     }
 
     Ok(tags)

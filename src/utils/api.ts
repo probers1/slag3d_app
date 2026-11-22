@@ -367,6 +367,13 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
     console.warn(`[apiFetch] Unhandled route: ${method} ${pathname}`);
     return { ok: false, status: 404, json: async () => ({ error: `Unhandled Tauri route: ${method} ${pathname}` }), text: async () => '' };
   } catch (e) {
-    return { ok: false, status: 500, json: async () => ({ error: (e as Error).message }) };
+    // Tauri command failures arrive either as a plain string or as the
+    // structured AppError envelope ({ kind, message }); normalize to a message.
+    const err = e as { kind?: string; message?: string } | string | Error;
+    const message =
+      typeof err === 'string'
+        ? err
+        : ((err as { message?: string })?.message || (err instanceof Error ? err.message : '') || 'Request failed');
+    return { ok: false, status: 500, json: async () => ({ error: message }) };
   }
 }

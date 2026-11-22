@@ -2,6 +2,7 @@ use crate::commands::{
     ModelDetail, ModelFile, ModelItem, PaginatedModels, CollectionRef,
 };
 use crate::db::schema::DEFAULT_USER_ID;
+use crate::errors::AppError;
 use crate::services::archive::{extract_7z, extract_zip};
 use crate::services::path_util::{is_safe_id, resolve_upload_relative_path};
 use crate::services::storage::{ExtractedFile, get_unique_filename, is_3d_file};
@@ -23,12 +24,12 @@ pub async fn get_models(
     tag: Option<String>,
     collection_id: Option<String>,
     filter: Option<String>,
-) -> Result<PaginatedModels, String> {
+) -> Result<PaginatedModels, AppError> {
     let page = page.max(1);
     let limit = limit.max(1).min(100);
     let offset = (page - 1) * limit;
 
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
 
     // Build WHERE clause and owned params
     let mut where_clauses: Vec<&str> = vec![];
@@ -66,9 +67,9 @@ pub async fn get_models(
 
     // Count total
     let count_sql = format!("SELECT COUNT(*) FROM models m {}", where_sql);
-    let mut stmt = conn.prepare(&count_sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&count_sql).map_err(|e| AppError::from(e.to_string()))?;
     let total: u32 = stmt.query_row(rusqlite::params_from_iter(params_list.iter()), |row| row.get(0))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| AppError::from(e.to_string()))?;
 
     // Fetch models
     let select_sql = format!(
@@ -103,7 +104,7 @@ pub async fn get_models(
     all_params.push(limit.to_string());
     all_params.push(offset.to_string());
 
-    let mut stmt = conn.prepare(&select_sql).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&select_sql).map_err(|e| AppError::from(e.to_string()))?;
     let rows = stmt.query_map(rusqlite::params_from_iter(all_params.iter()), |row| {
         let tags_str: Option<String> = row.get(10)?;
         let tags = tags_str.map(|s| s.split(',').map(|s| s.to_string()).collect()).unwrap_or_default();
@@ -137,9 +138,9 @@ pub async fn get_models(
             primary_file,
             is_favorited: row.get(17)?,
         })
-    }).map_err(|e| e.to_string())?;
+    }).map_err(|e| AppError::from(e.to_string()))?;
 
-    let models = rows.map(|r| r.map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
+    let models = rows.map(|r| r.map_err(|e| AppError::from(e.to_string()))).collect::<Result<_, _>>()?;
 
     Ok(PaginatedModels { models, total, page, limit })
 }
@@ -148,8 +149,8 @@ pub async fn get_models(
 pub async fn get_model_detail(
     app: AppHandle,
     id: String,
-) -> Result<ModelDetail, String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+) -> Result<ModelDetail, AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
     let user_id = DEFAULT_USER_ID.to_string();
 
     let model = conn.query_row(
@@ -174,19 +175,19 @@ pub async fn get_model_detail(
                 row.get::<_, bool>(9)?,     // is_favorited
             ))
         },
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
 
     // Tags
     let tags: Vec<String> = conn.prepare("SELECT tg.name FROM tags tg JOIN model_tags mt ON mt.tag_id = tg.id WHERE mt.model_id = ?")
-        .map_err(|e| e.to_string())?
+        .map_err(|e| AppError::from(e.to_string()))?
         .query_map(rusqlite::params![&id], |row| row.get(0))
-        .map_err(|e| e.to_string())?
+        .map_err(|e| AppError::from(e.to_string()))?
         .filter_map(Result::ok)
         .collect();
 
     // Files
     let files: Vec<ModelFile> = conn.prepare("SELECT id, filename, original_name, mime_type, file_size, file_path, is_primary_3d FROM files WHERE model_id = ?")
-        .map_err(|e| e.to_string())?
+        .map_err(|e| AppError::from(e.to_string()))?
         .query_map(rusqlite::params![&id], |row| {
             Ok(ModelFile {
                 id: row.get(0)?,
@@ -198,17 +199,17 @@ pub async fn get_model_detail(
                 is_primary_3d: row.get(6)?,
             })
         })
-        .map_err(|e| e.to_string())?
+        .map_err(|e| AppError::from(e.to_string()))?
         .filter_map(Result::ok)
         .collect();
 
     // Collections
     let collections: Vec<CollectionRef> = conn.prepare("SELECT c.id, c.name FROM collections c JOIN collection_models cm ON cm.collection_id = c.id WHERE cm.model_id = ?")
-        .map_err(|e| e.to_string())?
+        .map_err(|e| AppError::from(e.to_string()))?
         .query_map(rusqlite::params![&id], |row| {
             Ok(CollectionRef { id: row.get(0)?, name: row.get(1)? })
         })
-        .map_err(|e| e.to_string())?
+        .map_err(|e| AppError::from(e.to_string()))?
         .filter_map(Result::ok)
         .collect();
 
@@ -237,21 +238,21 @@ pub async fn import_models(
     description: Option<String>,
     tags: Option<String>,
     collection_id: Option<String>,
-) -> Result<ModelDetail, String> {
+) -> Result<ModelDetail, AppError> {
     let model_id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let user_id = DEFAULT_USER_ID.to_string();
 
     // Use the same app_data_dir as the DB and asset protocol (com.slag3d.app)
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::from(e.to_string()))?;
     std::env::set_var("SLAG3D_APP_DATA_DIR", &app_data_dir);
     let models_dir = app_data_dir.join("uploads").join("models").join(&model_id);
-    fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&models_dir).map_err(|e| AppError::from(e.to_string()))?;
 
     // Any failure before the DB commit must not leave a model directory with
     // no metadata row pointing at it. Extract first, then commit all rows in
     // one transaction; on either failure remove the directory we created.
-    let extracted_result: Result<Vec<ExtractedFile>, String> = (|| {
+    let extracted_result: Result<Vec<ExtractedFile>, AppError> = (|| {
         let mut all_extracted_files = Vec::new();
         for file_path_str in &file_paths {
             let path = Path::new(file_path_str);
@@ -273,8 +274,8 @@ pub async fn import_models(
                         None => continue,
                     };
                     let (filename, dest_path) = get_unique_filename(&models_dir, &raw_filename);
-                    fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
-                    let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
+                    fs::copy(path, &dest_path).map_err(|e| AppError::from(e.to_string()))?;
+                    let size = fs::metadata(&dest_path).map_err(|e| AppError::from(e.to_string()))?.len();
                     vec![ExtractedFile {
                         filename,
                         destination_path: dest_path,
@@ -287,7 +288,7 @@ pub async fn import_models(
         }
 
         if !all_extracted_files.iter().any(|f| is_3d_file(&f.filename)) {
-            return Err("No 3D files found. PDFs can only be attached to a model with a 3D file.".to_string());
+            return Err(AppError::from("No 3D files found. PDFs can only be attached to a model with a 3D file.".to_string()));
         }
         Ok(all_extracted_files)
     })();
@@ -304,14 +305,14 @@ pub async fn import_models(
     let model_title = title.unwrap_or_else(|| "Untitled Model".to_string());
     let model_description = description.unwrap_or_default();
 
-    let db_result: Result<(), String> = (|| {
-        let mut conn = get_db_connection(&app).map_err(|e| e.to_string())?;
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let db_result: Result<(), AppError> = (|| {
+        let mut conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
+        let tx = conn.transaction().map_err(|e| AppError::from(e.to_string()))?;
 
         tx.execute(
             "INSERT INTO models (id, user_id, title, description, thumbnail_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)",
             rusqlite::params![&model_id, &user_id, &model_title, &model_description, &now, &now],
-        ).map_err(|e| e.to_string())?;
+        ).map_err(|e| AppError::from(e.to_string()))?;
 
         // Insert files with public paths so the asset protocol can serve them
         let primary_3d_index = all_extracted_files.iter().position(|f| is_3d_file(&f.filename));
@@ -327,7 +328,7 @@ pub async fn import_models(
                     &file_id, &model_id, &file.filename, &file.filename,
                     &mime_type, file.size as i64, &public_path, is_primary
                 ],
-            ).map_err(|e| e.to_string())?;
+            ).map_err(|e| AppError::from(e.to_string()))?;
         }
 
         // Handle tags
@@ -337,18 +338,18 @@ pub async fn import_models(
                 tx.execute(
                     "INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)",
                     rusqlite::params![&new_tag_id, tag_name],
-                ).map_err(|e| e.to_string())?;
+                ).map_err(|e| AppError::from(e.to_string()))?;
 
                 let tag_id: String = tx.query_row(
                     "SELECT id FROM tags WHERE name = ?",
                     rusqlite::params![tag_name],
                     |row| row.get(0),
-                ).map_err(|e| e.to_string())?;
+                ).map_err(|e| AppError::from(e.to_string()))?;
 
                 tx.execute(
                     "INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?, ?)",
                     rusqlite::params![&model_id, &tag_id],
-                ).map_err(|e| e.to_string())?;
+                ).map_err(|e| AppError::from(e.to_string()))?;
             }
         }
 
@@ -357,10 +358,10 @@ pub async fn import_models(
             tx.execute(
                 "INSERT OR IGNORE INTO collection_models (collection_id, model_id) VALUES (?, ?)",
                 rusqlite::params![&cid, &model_id],
-            ).map_err(|e| e.to_string())?;
+            ).map_err(|e| AppError::from(e.to_string()))?;
         }
 
-        tx.commit().map_err(|e| e.to_string())
+        tx.commit().map_err(|e| AppError::from(e.to_string()))
     })();
 
     if let Err(e) = db_result {
@@ -379,46 +380,46 @@ pub async fn update_model(
     description: Option<String>,
     tags: Option<String>,
     primary_file_id: Option<String>,
-) -> Result<(), String> {
-    let mut conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+) -> Result<(), AppError> {
+    let mut conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
     let now = chrono::Utc::now().to_rfc3339();
 
     // Title, tags and primary file must succeed or fail together. Previously a
     // tag failure left the title changed and the model with no tags at all.
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| AppError::from(e.to_string()))?;
 
     if let Some(t) = title {
-        tx.execute("UPDATE models SET title = ?, updated_at = ? WHERE id = ?", rusqlite::params![&t, &now, &id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE models SET title = ?, updated_at = ? WHERE id = ?", rusqlite::params![&t, &now, &id]).map_err(|e| AppError::from(e.to_string()))?;
     }
     if let Some(d) = description {
-        tx.execute("UPDATE models SET description = ?, updated_at = ? WHERE id = ?", rusqlite::params![&d, &now, &id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE models SET description = ?, updated_at = ? WHERE id = ?", rusqlite::params![&d, &now, &id]).map_err(|e| AppError::from(e.to_string()))?;
     }
 
     if let Some(tag_string) = tags {
-        tx.execute("DELETE FROM model_tags WHERE model_id = ?", rusqlite::params![&id]).map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM model_tags WHERE model_id = ?", rusqlite::params![&id]).map_err(|e| AppError::from(e.to_string()))?;
         for tag_name in tag_string.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
             let new_tag_id = Uuid::new_v4().to_string();
-            tx.execute("INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)", rusqlite::params![&new_tag_id, tag_name]).map_err(|e| e.to_string())?;
-            let tag_id: String = tx.query_row("SELECT id FROM tags WHERE name = ?", rusqlite::params![tag_name], |row| row.get(0)).map_err(|e| e.to_string())?;
-            tx.execute("INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?, ?)", rusqlite::params![&id, &tag_id]).map_err(|e| e.to_string())?;
+            tx.execute("INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)", rusqlite::params![&new_tag_id, tag_name]).map_err(|e| AppError::from(e.to_string()))?;
+            let tag_id: String = tx.query_row("SELECT id FROM tags WHERE name = ?", rusqlite::params![tag_name], |row| row.get(0)).map_err(|e| AppError::from(e.to_string()))?;
+            tx.execute("INSERT OR IGNORE INTO model_tags (model_id, tag_id) VALUES (?, ?)", rusqlite::params![&id, &tag_id]).map_err(|e| AppError::from(e.to_string()))?;
         }
     }
 
     if let Some(pfid) = primary_file_id {
         let filename: Option<String> = tx
             .prepare("SELECT filename FROM files WHERE id = ? AND model_id = ?")
-            .map_err(|e| e.to_string())?
+            .map_err(|e| AppError::from(e.to_string()))?
             .query_row(rusqlite::params![&pfid, &id], |row| row.get(0))
             .optional()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| AppError::from(e.to_string()))?;
         if !filename.as_deref().is_some_and(is_3d_file) {
-            return Err("Only 3D files can be set as primary".to_string());
+            return Err(AppError::from("Only 3D files can be set as primary".to_string()));
         }
-        tx.execute("UPDATE files SET is_primary_3d = 0 WHERE model_id = ?", rusqlite::params![&id]).map_err(|e| e.to_string())?;
-        tx.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ? AND model_id = ?", rusqlite::params![&pfid, &id]).map_err(|e| e.to_string())?;
+        tx.execute("UPDATE files SET is_primary_3d = 0 WHERE model_id = ?", rusqlite::params![&id]).map_err(|e| AppError::from(e.to_string()))?;
+        tx.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ? AND model_id = ?", rusqlite::params![&pfid, &id]).map_err(|e| AppError::from(e.to_string()))?;
     }
 
-    tx.commit().map_err(|e| e.to_string())
+    tx.commit().map_err(|e| AppError::from(e.to_string()))
 }
 
 /// Add supplementary files to an existing model. Mirrors the web server's
@@ -429,19 +430,19 @@ pub async fn add_model_files(
     app: AppHandle,
     model_id: String,
     file_paths: Vec<String>,
-) -> Result<Vec<ModelFile>, String> {
+) -> Result<Vec<ModelFile>, AppError> {
     if !is_safe_id(&model_id) {
-        return Err("Invalid model ID".to_string());
+        return Err(AppError::from("Invalid model ID".to_string()));
     }
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::from(e.to_string()))?;
     std::env::set_var("SLAG3D_APP_DATA_DIR", &app_data_dir);
     let models_dir = app_data_dir.join("uploads").join("models").join(&model_id);
-    fs::create_dir_all(&models_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&models_dir).map_err(|e| AppError::from(e.to_string()))?;
 
     // Remember which files already belong to the model so a failed import
     // can remove only the files it added, never the existing ones.
     let existing: HashSet<_> = fs::read_dir(&models_dir)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| AppError::from(e.to_string()))?
         .filter_map(|e| e.ok().map(|e| e.file_name()))
         .collect();
     let cleanup_new_files = || {
@@ -454,7 +455,7 @@ pub async fn add_model_files(
         }
     };
 
-    let extracted_result: Result<Vec<ExtractedFile>, String> = (|| {
+    let extracted_result: Result<Vec<ExtractedFile>, AppError> = (|| {
         let mut all_extracted: Vec<ExtractedFile> = Vec::new();
         for file_path_str in &file_paths {
             let path = Path::new(file_path_str);
@@ -470,8 +471,8 @@ pub async fn add_model_files(
                         None => continue,
                     };
                     let (filename, dest_path) = get_unique_filename(&models_dir, &raw_filename);
-                    fs::copy(path, &dest_path).map_err(|e| e.to_string())?;
-                    let size = fs::metadata(&dest_path).map_err(|e| e.to_string())?.len();
+                    fs::copy(path, &dest_path).map_err(|e| AppError::from(e.to_string()))?;
+                    let size = fs::metadata(&dest_path).map_err(|e| AppError::from(e.to_string()))?.len();
                     vec![ExtractedFile {
                         filename,
                         destination_path: dest_path,
@@ -482,7 +483,7 @@ pub async fn add_model_files(
             all_extracted.extend(extracted);
         }
         if all_extracted.is_empty() {
-            return Err("No valid 3D files found in archives".to_string());
+            return Err(AppError::from("No valid 3D files found in archives".to_string()));
         }
         Ok(all_extracted)
     })();
@@ -495,9 +496,9 @@ pub async fn add_model_files(
         }
     };
 
-    let db_result: Result<Vec<ModelFile>, String> = (|| {
-        let mut conn = get_db_connection(&app).map_err(|e| e.to_string())?;
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let db_result: Result<Vec<ModelFile>, AppError> = (|| {
+        let mut conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
+        let tx = conn.transaction().map_err(|e| AppError::from(e.to_string()))?;
 
         let mut inserted: Vec<ModelFile> = Vec::new();
         for file in &all_extracted {
@@ -510,7 +511,7 @@ pub async fn add_model_files(
                     &file_id, &model_id, &file.filename, &file.filename,
                     &mime_type, file.size as i64, &public_path, 0,
                 ],
-            ).map_err(|e| e.to_string())?;
+            ).map_err(|e| AppError::from(e.to_string()))?;
             inserted.push(ModelFile {
                 id: file_id,
                 filename: file.filename.clone(),
@@ -526,10 +527,10 @@ pub async fn add_model_files(
         // current primary.
         let current_primary = tx
             .prepare("SELECT id, file_size FROM files WHERE model_id = ? AND is_primary_3d = 1")
-            .map_err(|e| e.to_string())?
+            .map_err(|e| AppError::from(e.to_string()))?
             .query_row(rusqlite::params![&model_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
             .optional()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| AppError::from(e.to_string()))?;
 
         let largest_new = inserted
             .iter()
@@ -539,13 +540,13 @@ pub async fn add_model_files(
         if let Some(largest) = largest_new {
             if current_primary.map_or(true, |(_, size)| largest.file_size as u64 > size as u64) {
                 tx.execute("UPDATE files SET is_primary_3d = 0 WHERE model_id = ?", rusqlite::params![&model_id])
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| AppError::from(e.to_string()))?;
                 tx.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ? AND model_id = ?", rusqlite::params![&largest.id, &model_id])
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| AppError::from(e.to_string()))?;
             }
         }
 
-        tx.commit().map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| AppError::from(e.to_string()))?;
         Ok(inserted)
     })();
 
@@ -559,9 +560,9 @@ pub async fn add_model_files(
 }
 
 #[tauri::command]
-pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn delete_model(app: AppHandle, id: String) -> Result<(), AppError> {
     if !is_safe_id(&id) {
-        return Err("Invalid model ID".to_string());
+        return Err(AppError::from("Invalid model ID".to_string()));
     }
     // Hard delete — matches the Express server's `DELETE /api/models/:id`
     // (purge files from disk, then cascade the DB row). The spec for the
@@ -569,9 +570,9 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
     // disk" (design doc §5.2), so soft-delete was an implementation
     // inconsistency with the server. Aligning on hard delete means the same
     // model can never be recovered from either surface.
-    let mut conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+    let mut conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
 
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::from(e.to_string()))?;
     let models_dir = app_data_dir.join("uploads").join("models").join(&id);
     let thumb_path = app_data_dir.join("uploads").join("thumbnails").join(format!("{}.png", id));
 
@@ -579,7 +580,7 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
     // are atomic and reversible, so a failed DB transaction can put everything
     // back. Deleting files first would leave DB rows pointing at missing files.
     let staging = app_data_dir.join(format!(".delete-staging-{}", Uuid::new_v4()));
-    fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&staging).map_err(|e| AppError::from(e.to_string()))?;
     let mut staged_model: Option<PathBuf> = None;
     let mut staged_thumb: Option<PathBuf> = None;
 
@@ -587,7 +588,7 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
         let dest = staging.join("model");
         if let Err(e) = fs::rename(&models_dir, &dest) {
             let _ = fs::remove_dir_all(&staging);
-            return Err(e.to_string());
+            return Err(AppError::from(e.to_string()));
         }
         staged_model = Some(dest);
     }
@@ -599,7 +600,7 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
                 let _ = fs::rename(model, &models_dir);
             }
             let _ = fs::remove_dir_all(&staging);
-            return Err(e.to_string());
+            return Err(AppError::from(e.to_string()));
         }
         staged_thumb = Some(dest);
     }
@@ -607,11 +608,11 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
     // Delete database record. Migration v7 added `FOREIGN KEY ... ON DELETE
     // CASCADE` from files/model_tags/favorites/collection_models to models, so
     // deleting the model row cascades to the dependents within this transaction.
-    let delete_result = (|| -> Result<(), String> {
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let delete_result = (|| -> Result<(), AppError> {
+        let tx = conn.transaction().map_err(|e| AppError::from(e.to_string()))?;
         tx.execute("DELETE FROM models WHERE id = ?", rusqlite::params![&id])
-            .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())
+            .map_err(|e| AppError::from(e.to_string()))?;
+        tx.commit().map_err(|e| AppError::from(e.to_string()))
     })();
 
     if let Err(e) = delete_result {
@@ -632,8 +633,8 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String) -> Result<(), String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String) -> Result<(), AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
     
     // Get the file to delete
     let file = conn.query_row(
@@ -646,10 +647,10 @@ pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String
                 row.get::<_, String>(2)?,  // original_name
             ))
         },
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
     
     // Delete physical file from disk
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::from(e.to_string()))?;
     let uploads_dir = app_data_dir.join("uploads");
     // The path comes from the DB (and a restored backup is trusted input only
     // after validation), so run it through the same canonical containment
@@ -657,11 +658,11 @@ pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String
     let full_path = resolve_upload_relative_path(&file.0, &uploads_dir)?;
 
     if full_path.is_file() {
-        fs::remove_file(&full_path).map_err(|e| e.to_string())?;
+        fs::remove_file(&full_path).map_err(|e| AppError::from(e.to_string()))?;
     }
     
     // Delete database record
-    conn.execute("DELETE FROM files WHERE id = ?", rusqlite::params![&file_id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM files WHERE id = ?", rusqlite::params![&file_id]).map_err(|e| AppError::from(e.to_string()))?;
     
     // If this was the primary 3D file, select a new primary from remaining files
     if file.1 == 1 {
@@ -676,10 +677,10 @@ pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String
                     row.get::<_, String>(3)?,  // file_path
                 ))
             },
-        ).optional().map_err(|e| e.to_string())?;
+        ).optional().map_err(|e| AppError::from(e.to_string()))?;
         
         if let Some(rem) = remaining {
-            conn.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ?", rusqlite::params![&rem.0]).map_err(|e| e.to_string())?;
+            conn.execute("UPDATE files SET is_primary_3d = 1 WHERE id = ?", rusqlite::params![&rem.0]).map_err(|e| AppError::from(e.to_string()))?;
             
             // Re-queue thumbnail render for the new primary 3D file
             // Note: In Tauri, thumbnail generation is handled differently (client-side)
@@ -687,7 +688,7 @@ pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String
         } else {
             // No remaining 3D files - update thumbnail status
             let now = chrono::Utc::now().to_rfc3339();
-            conn.execute("UPDATE models SET thumbnail_status = 'failed', updated_at = ? WHERE id = ?", rusqlite::params![&now, &model_id]).map_err(|e| e.to_string())?;
+            conn.execute("UPDATE models SET thumbnail_status = 'failed', updated_at = ? WHERE id = ?", rusqlite::params![&now, &model_id]).map_err(|e| AppError::from(e.to_string()))?;
         }
     }
     
@@ -695,8 +696,8 @@ pub async fn delete_model_file(app: AppHandle, model_id: String, file_id: String
 }
 
 #[tauri::command]
-pub async fn toggle_favorite(app: AppHandle, id: String) -> Result<bool, String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+pub async fn toggle_favorite(app: AppHandle, id: String) -> Result<bool, AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
     let user_id = DEFAULT_USER_ID.to_string();
 
     let exists: bool = conn.query_row(
@@ -706,10 +707,10 @@ pub async fn toggle_favorite(app: AppHandle, id: String) -> Result<bool, String>
     ).unwrap_or(false);
 
     if exists {
-        conn.execute("DELETE FROM favorites WHERE user_id = ? AND model_id = ?", rusqlite::params![&user_id, &id]).map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM favorites WHERE user_id = ? AND model_id = ?", rusqlite::params![&user_id, &id]).map_err(|e| AppError::from(e.to_string()))?;
         Ok(false)
     } else {
-        conn.execute("INSERT INTO favorites (user_id, model_id) VALUES (?, ?)", rusqlite::params![&user_id, &id]).map_err(|e| e.to_string())?;
+        conn.execute("INSERT INTO favorites (user_id, model_id) VALUES (?, ?)", rusqlite::params![&user_id, &id]).map_err(|e| AppError::from(e.to_string()))?;
         Ok(true)
     }
 }
@@ -719,8 +720,8 @@ pub async fn toggle_favorite(app: AppHandle, id: String) -> Result<bool, String>
 /// `fetch()` a custom-scheme URL (which WebView2 on Windows intercepts
 /// differently from WKWebView, leaving the viewer and thumbnail renderer blank).
 #[tauri::command]
-pub async fn read_file(app: AppHandle, path: String) -> Result<tauri::ipc::Response, String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+pub async fn read_file(app: AppHandle, path: String) -> Result<tauri::ipc::Response, AppError> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::from(e.to_string()))?;
     let uploads_dir = app_data_dir.join("uploads");
 
     // Resolve the path using the shared path_util. Handles all scheme variants,
@@ -728,10 +729,10 @@ pub async fn read_file(app: AppHandle, path: String) -> Result<tauri::ipc::Respo
     let canonical_file = resolve_upload_relative_path(&path, &uploads_dir)?;
 
     if !canonical_file.is_file() {
-        return Err("Access denied".to_string());
+        return Err(AppError::from("Access denied".to_string()));
     }
 
-    let content = fs::read(&canonical_file).map_err(|e| e.to_string())?;
+    let content = fs::read(&canonical_file).map_err(|e| AppError::from(e.to_string()))?;
     Ok(tauri::ipc::Response::new(content))
 }
 
@@ -747,8 +748,8 @@ pub async fn save_downloaded_file(
     app: AppHandle,
     source_path: String,
     dest_path: String,
-) -> Result<(), String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+) -> Result<(), AppError> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| AppError::from(e.to_string()))?;
     let uploads_dir = app_data_dir.join("uploads");
 
     // Resolve the source using the shared path_util. Handles all scheme variants,
@@ -756,34 +757,34 @@ pub async fn save_downloaded_file(
     let canonical_file = resolve_upload_relative_path(&source_path, &uploads_dir)?;
 
     if !canonical_file.is_file() {
-        return Err("Access denied".to_string());
+        return Err(AppError::from("Access denied".to_string()));
     }
 
     // The parent directory of the user's chosen path may not exist yet.
     if let Some(parent) = std::path::Path::new(&dest_path).parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        fs::create_dir_all(parent).map_err(|e| AppError::from(e.to_string()))?;
     }
-    fs::copy(&canonical_file, &dest_path).map_err(|e| e.to_string())?;
+    fs::copy(&canonical_file, &dest_path).map_err(|e| AppError::from(e.to_string()))?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn save_thumbnail(app: AppHandle, id: String, image_base64: String) -> Result<String, String> {
+pub async fn save_thumbnail(app: AppHandle, id: String, image_base64: String) -> Result<String, AppError> {
     if !is_safe_id(&id) {
-        return Err("Invalid model ID".to_string());
+        return Err(AppError::from("Invalid model ID".to_string()));
     }
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
 
     // Decode base64
-    let image_data = general_purpose::STANDARD.decode(&image_base64).map_err(|e| e.to_string())?;
+    let image_data = general_purpose::STANDARD.decode(&image_base64).map_err(|e| AppError::from(e.to_string()))?;
 
     // Save thumbnail to uploads/thumbnails/<id>.png
-    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app.path().app_data_dir().map_err(|e| AppError::from(e.to_string()))?;
     let uploads_dir = app_data.join("uploads");
     let thumbnails_dir = uploads_dir.join("thumbnails");
-    fs::create_dir_all(&thumbnails_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&thumbnails_dir).map_err(|e| AppError::from(e.to_string()))?;
     let thumbnail_path = thumbnails_dir.join(format!("{}.png", id));
-    fs::write(&thumbnail_path, &image_data).map_err(|e| e.to_string())?;
+    fs::write(&thumbnail_path, &image_data).map_err(|e| AppError::from(e.to_string()))?;
 
     // Store public path so the asset protocol can serve it
     let public_path = format!("/uploads/thumbnails/{}.png", id);
@@ -793,7 +794,7 @@ pub async fn save_thumbnail(app: AppHandle, id: String, image_base64: String) ->
     conn.execute(
         "UPDATE models SET thumbnail_path = ?, thumbnail_status = 'completed', updated_at = ? WHERE id = ?",
         rusqlite::params![&public_path, &now, &id],
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
 
     Ok(public_path)
 }

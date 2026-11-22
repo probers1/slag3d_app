@@ -5,6 +5,7 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use crate::db::{get_db_connection, schema::init_schema};
+use crate::errors::AppError;
 use crate::services::backup::{
     extract_backup_archive, replace_uploads_dir, restore_database, restore_previous_uploads,
     schema_version, snapshot_database, validate_backup_db, BackupInfo, DB_NAME,
@@ -12,7 +13,7 @@ use crate::services::backup::{
 use crate::services::storage::{ensure_dirs, get_app_data_dir, get_backup_work_dir};
 
 #[tauri::command]
-pub async fn create_backup(app: AppHandle, destination: String) -> Result<BackupInfo, String> {
+pub async fn create_backup(app: AppHandle, destination: String) -> Result<BackupInfo, AppError> {
     let conn = get_db_connection(&app)?;
     let app_data = get_app_data_dir();
     let work = get_backup_work_dir().join(format!("export-{}", Uuid::new_v4()));
@@ -25,54 +26,54 @@ pub async fn create_backup(app: AppHandle, destination: String) -> Result<Backup
         env!("CARGO_PKG_VERSION"),
     );
     let _ = fs::remove_dir_all(&work);
-    result.map_err(|e| e.to_string())
+    result.map_err(|e| AppError::from(e.to_string()))
 }
 
 #[tauri::command]
-pub async fn import_backup(app: AppHandle, archive_path: String) -> Result<BackupInfo, String> {
+pub async fn import_backup(app: AppHandle, archive_path: String) -> Result<BackupInfo, AppError> {
     let archive = PathBuf::from(&archive_path);
     if !archive.is_file() {
-        return Err("Backup file not found".to_string());
+        return Err(AppError::from("Backup file not found".to_string()));
     }
 
     let app_data = get_app_data_dir();
     let work = get_backup_work_dir().join(format!("import-{}", Uuid::new_v4()));
 
-    let manifest = extract_backup_archive(&archive, &work).map_err(|e| e.to_string())?;
+    let manifest = extract_backup_archive(&archive, &work).map_err(|e| AppError::from(e.to_string()))?;
     let (db_schema_version, db_model_count) =
-        validate_backup_db(&work.join(DB_NAME)).map_err(|e| e.to_string())?;
+        validate_backup_db(&work.join(DB_NAME)).map_err(|e| AppError::from(e.to_string()))?;
 
     // manifest.json is untrusted metadata: a crafted or stale backup can claim
     // any version or model count. The DB snapshot is the source of truth, and
     // a mismatch means the archive was tampered with or written incorrectly.
     if manifest.schema_version != db_schema_version || manifest.model_count != db_model_count {
         let _ = fs::remove_dir_all(&work);
-        return Err(format!(
+        return Err(AppError::from(format!(
             "Backup manifest does not match its database (schema v{}/v{}, {} / {} models)",
             manifest.schema_version, db_schema_version, manifest.model_count, db_model_count
-        ));
+        )));
     }
 
     let mut conn = get_db_connection(&app)?;
     if db_schema_version > schema_version(&conn) {
         let _ = fs::remove_dir_all(&work);
-        return Err(format!(
+        return Err(AppError::from(format!(
             "Backup needs a newer SLAG3D version (schema v{}); update the app first.",
             db_schema_version
-        ));
+        )));
     }
     let rollback_db = work.join("pre-restore.db");
-    let mut result = snapshot_database(&conn, &rollback_db).map_err(|e| e.to_string());
+    let mut result = snapshot_database(&conn, &rollback_db).map_err(|e| AppError::from(e.to_string()));
     let mut staged_uploads: Option<PathBuf> = None;
 
     if result.is_ok() {
-        result = (|| -> Result<(), String> {
-            restore_database(&work.join(DB_NAME), &mut conn).map_err(|e| e.to_string())?;
+        result = (|| -> Result<(), AppError> {
+            restore_database(&work.join(DB_NAME), &mut conn).map_err(|e| AppError::from(e.to_string()))?;
             // A backup made by an older version may need migrations (e.g. v5 -> v6).
-            init_schema(&conn).map_err(|e| e.to_string())?;
+            init_schema(&conn).map_err(|e| AppError::from(e.to_string()))?;
             staged_uploads =
-                replace_uploads_dir(&app_data, &work.join("uploads")).map_err(|e| e.to_string())?;
-            ensure_dirs().map_err(|e| e.to_string())?;
+                replace_uploads_dir(&app_data, &work.join("uploads")).map_err(|e| AppError::from(e.to_string()))?;
+            ensure_dirs().map_err(|e| AppError::from(e.to_string()))?;
             Ok(())
         })();
 
@@ -98,7 +99,7 @@ pub async fn import_backup(app: AppHandle, archive_path: String) -> Result<Backu
 
     Ok(BackupInfo {
         path: archive_path,
-        size: fs::metadata(&archive).map_err(|e| e.to_string())?.len(),
+        size: fs::metadata(&archive).map_err(|e| AppError::from(e.to_string()))?.len(),
         created_at: manifest.created_at,
         model_count: db_model_count,
     })

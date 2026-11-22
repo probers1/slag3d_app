@@ -1,12 +1,13 @@
 use crate::commands::CollectionItem;
+use crate::errors::AppError;
 use crate::db::schema::DEFAULT_USER_ID;
 use crate::db::get_db_connection;
 use tauri::AppHandle;
 use uuid::Uuid;
 
 #[tauri::command]
-pub async fn get_collections(app: AppHandle) -> Result<Vec<CollectionItem>, String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+pub async fn get_collections(app: AppHandle) -> Result<Vec<CollectionItem>, AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
     let user_id = DEFAULT_USER_ID.to_string();
 
     let mut stmt = conn.prepare(
@@ -20,7 +21,7 @@ pub async fn get_collections(app: AppHandle) -> Result<Vec<CollectionItem>, Stri
         GROUP BY c.id
         ORDER BY c.name
         "#,
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
 
     let rows = stmt.query_map([&user_id], |row| {
         Ok(CollectionItem {
@@ -32,11 +33,11 @@ pub async fn get_collections(app: AppHandle) -> Result<Vec<CollectionItem>, Stri
             model_count: row.get(5)?,
             children: None,
         })
-    }).map_err(|e| e.to_string())?;
+    }).map_err(|e| AppError::from(e.to_string()))?;
 
     let mut collections = Vec::new();
     for row in rows {
-        collections.push(row.map_err(|e| e.to_string())?);
+        collections.push(row.map_err(|e| AppError::from(e.to_string()))?);
     }
 
     // Order collections hierarchically (depth-first) so children appear directly under their parents
@@ -78,8 +79,8 @@ pub async fn create_collection(
     name: String,
     description: Option<String>,
     parent_folder_id: Option<String>,
-) -> Result<CollectionItem, String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+) -> Result<CollectionItem, AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
     let id = Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -87,7 +88,7 @@ pub async fn create_collection(
     conn.execute(
         "INSERT INTO collections (id, user_id, name, description, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         rusqlite::params![&id, &user_id, &name, &description.clone().unwrap_or_default(), parent_folder_id.clone(), &now, &now],
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
 
     Ok(CollectionItem {
         id,
@@ -101,58 +102,58 @@ pub async fn create_collection(
 }
 
 #[tauri::command]
-pub async fn rename_collection(app: AppHandle, id: String, name: String) -> Result<(), String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+pub async fn rename_collection(app: AppHandle, id: String, name: String) -> Result<(), AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
     let now = chrono::Utc::now().to_rfc3339();
     let user_id = DEFAULT_USER_ID.to_string();
 
     conn.execute(
         "UPDATE collections SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?",
         rusqlite::params![&name, &now, &id, &user_id],
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
 
     Ok(())
 }
 
 #[tauri::command]
-pub async fn delete_collection(app: AppHandle, id: String) -> Result<(), String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+pub async fn delete_collection(app: AppHandle, id: String) -> Result<(), AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
     let user_id = DEFAULT_USER_ID.to_string();
 
     // Re-parent any sub-folders to the deleted folder's parent (or NULL if root) to prevent orphaned collections
     conn.execute(
         "UPDATE collections SET parent_folder_id = (SELECT parent_folder_id FROM collections WHERE id = ?1) WHERE parent_folder_id = ?1",
         rusqlite::params![&id],
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
 
     // Delete collection models first
-    conn.execute("DELETE FROM collection_models WHERE collection_id = ?", rusqlite::params![&id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM collection_models WHERE collection_id = ?", rusqlite::params![&id]).map_err(|e| AppError::from(e.to_string()))?;
     // Delete collection
-    conn.execute("DELETE FROM collections WHERE id = ? AND user_id = ?", rusqlite::params![&id, &user_id]).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM collections WHERE id = ? AND user_id = ?", rusqlite::params![&id, &user_id]).map_err(|e| AppError::from(e.to_string()))?;
 
     Ok(())
 }
 
 #[tauri::command]
-pub async fn add_model_to_collection(app: AppHandle, collection_id: String, model_id: String) -> Result<(), String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+pub async fn add_model_to_collection(app: AppHandle, collection_id: String, model_id: String) -> Result<(), AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
 
     conn.execute(
         "INSERT OR IGNORE INTO collection_models (collection_id, model_id) VALUES (?, ?)",
         [&collection_id, &model_id],
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
 
     Ok(())
 }
 
 #[tauri::command]
-pub async fn remove_model_from_collection(app: AppHandle, collection_id: String, model_id: String) -> Result<(), String> {
-    let conn = get_db_connection(&app).map_err(|e| e.to_string())?;
+pub async fn remove_model_from_collection(app: AppHandle, collection_id: String, model_id: String) -> Result<(), AppError> {
+    let conn = get_db_connection(&app).map_err(|e| AppError::from(e.to_string()))?;
 
     conn.execute(
         "DELETE FROM collection_models WHERE collection_id = ? AND model_id = ?",
         [&collection_id, &model_id],
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|e| AppError::from(e.to_string()))?;
 
     Ok(())
 }

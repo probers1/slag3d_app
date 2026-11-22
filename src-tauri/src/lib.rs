@@ -2,6 +2,7 @@ use tauri::{Builder, Manager};
 
 pub mod commands;
 pub mod db;
+pub mod errors;
 pub mod protocol;
 pub mod services;
 
