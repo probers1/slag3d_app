@@ -45,7 +45,7 @@ async function toAssetUrl(path: string): Promise<string> {
   return `${origin}/uploads/${relativePath}`;
 }
 
-async function mapAssetPaths(value: any): Promise<any> {
+export async function mapAssetPaths(value: any): Promise<any> {
   if (typeof value === 'string') {
     // Convert thumbnail paths to custom protocol URLs in Tauri mode
     return toAssetUrl(value);
@@ -247,6 +247,15 @@ export async function fetchFileAsBlobUrl(path: string): Promise<string> {
   return URL.createObjectURL(new Blob([buffer], mimeType ? { type: mimeType } : undefined));
 }
 
+export function errorMessage(e: unknown): string {
+  if (typeof e === 'string') return e;
+  const err = e as { kind?: string; message?: string } | Error | null;
+  const message = err && typeof err === 'object' ? (err as { message?: string }).message : undefined;
+  if (typeof message === 'string' && message) return message;
+  if (e instanceof Error) return e.message;
+  return 'Request failed';
+}
+
 export async function apiFetch(url: string, options: RequestInit = {}) {
   const method = (options.method || 'GET').toUpperCase();
   const u = new URL(url, 'http://localhost');
@@ -369,11 +378,7 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
   } catch (e) {
     // Tauri command failures arrive either as a plain string or as the
     // structured AppError envelope ({ kind, message }); normalize to a message.
-    const err = e as { kind?: string; message?: string } | string | Error;
-    const message =
-      typeof err === 'string'
-        ? err
-        : ((err as { message?: string })?.message || (err instanceof Error ? err.message : '') || 'Request failed');
+    const message = errorMessage(e);
     return { ok: false, status: 500, json: async () => ({ error: message }) };
   }
 }
