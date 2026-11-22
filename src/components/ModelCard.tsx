@@ -11,13 +11,15 @@ interface ModelCardProps {
   onThumbnailUpdated?: (modelId: string, thumbnailPath: string) => void;
 }
 
-export const ModelCard: React.FC<ModelCardProps> = ({
+// Memoized so grid re-renders caused by unrelated parent state (e.g. toggling
+// a favorite on another card) don't re-render every card in the grid.
+export const ModelCard = React.memo(function ModelCard({
   model,
   onSelect,
   onToggleFavorite,
   onRetryThumbnail,
   onThumbnailUpdated,
-}) => {
+}: ModelCardProps) {
   const primaryExt = model.primary_file
     ? model.primary_file.original_name.split('.').pop()?.toUpperCase()
     : '3D';
@@ -143,4 +145,4 @@ export const ModelCard: React.FC<ModelCardProps> = ({
       </div>
     </div>
   );
-};
+});

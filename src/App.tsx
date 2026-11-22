@@ -105,8 +105,14 @@ export default function App() {
     }
   };
 
+  // Select a model from the grid (stable identity so memoized cards don't
+  // re-render when the parent re-renders for unrelated reasons).
+  const handleSelectModel = useCallback((id: string) => {
+    setSelectedModelId(id);
+  }, []);
+
   // Toggle favorite
-  const handleToggleFavorite = async (id: string, e: React.MouseEvent) => {
+  const handleToggleFavorite = useCallback(async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
       const res = await apiFetch(`/api/models/${id}/favorite`, { method: 'POST' });
@@ -119,10 +125,10 @@ export default function App() {
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
     }
-  };
+  }, []);
 
   // Retry thumbnail render
-  const handleRetryThumbnail = async (id: string, e: React.MouseEvent) => {
+  const handleRetryThumbnail = useCallback(async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
       const res = await apiFetch(`/api/models/${id}/regenerate-thumbnail`, { method: 'POST' });
@@ -134,7 +140,7 @@ export default function App() {
     } catch (err) {
       console.error('Failed to trigger re-render:', err);
     }
-  };
+  }, []);
 
   // Update a model's thumbnail in the grid after a client-side render (e.g.
   // the "Save as Thumbnail" capture in the viewer). The saved PNG lives at a
@@ -380,7 +386,7 @@ export default function App() {
                       <ModelCard
                         key={m.id}
                         model={m}
-                        onSelect={(id) => setSelectedModelId(id)}
+                        onSelect={handleSelectModel}
                         onToggleFavorite={handleToggleFavorite}
                         onRetryThumbnail={handleRetryThumbnail}
                         onThumbnailUpdated={handleThumbnailUpdated}
