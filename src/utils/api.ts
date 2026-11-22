@@ -162,6 +162,16 @@ export async function apiGetTags() {
   return await mapAssetPaths(data);
 }
 
+export async function apiAddTag(name: string) {
+  const data = await invoke<{ id: string; name: string; count: number }>('add_tag', { name });
+  return (await mapAssetPaths([data]))[0];
+}
+
+export async function apiDeleteTag(id: string) {
+  const data = await invoke<{ id: string; name: string; count: number }>('delete_tag', { id });
+  return (await mapAssetPaths([data]))[0];
+}
+
 export const MODEL_FILE_FILTERS = ['stl', '3mf', 'obj', 'zip', '7z', 'pdf'];
 
 export async function pickFiles(multiple = true, filters?: string[]) {
@@ -277,6 +287,20 @@ export async function apiFetch(url: string, options: RequestInit = {}) {
     if (pathname === '/api/tags' && method === 'GET') {
       const data = await apiGetTags();
       return makeResponse({ tags: data });
+    }
+    if (pathname === '/api/tags' && method === 'POST') {
+      const body = options.body ? JSON.parse(options.body as string) : {};
+      const name = body.name;
+      if (!name || typeof name !== 'string' || name.trim() === '') {
+        return makeResponse({ ok: false, error: 'Tag name is required and must be a non-empty string.' });
+      }
+      const data = await apiAddTag(name);
+      return makeResponse(data);
+    }
+    if (pathname.match(/^\/api\/tags\/[^/]+$/) && method === 'DELETE') {
+      const id = pathname.split('/')[3];
+      const data = await apiDeleteTag(id);
+      return makeResponse(data);
     }
     if (pathname === '/api/models' && method === 'GET') {
       const page = Number(params.get('page') || '1');

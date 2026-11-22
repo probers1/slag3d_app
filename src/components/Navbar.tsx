@@ -1,11 +1,12 @@
-import React from 'react';
-import { Archive, Upload } from 'lucide-react';
+import React, { useState } from 'react';
+import { Archive, Upload, Tag } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: 'all' | 'favorites' | 'collections';
   onTabChange: (tab: 'all' | 'favorites' | 'collections') => void;
   onOpenUpload: () => void;
   onOpenBackup: () => void;
+  onOpenTags: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -13,6 +14,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onTabChange,
   onOpenUpload,
   onOpenBackup,
+  onOpenTags,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-[#16161a]/95 backdrop-blur-md border-b border-[#262630] px-4 lg:px-8 py-3.5">
@@ -74,6 +76,14 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Upload className="w-3.5 h-3.5" />
             Upload Model
+          </button>
+          <button
+            onClick={onOpenTags}
+            title="Manage tags"
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-neutral-300 bg-[#22222c] border border-[#343444] rounded-lg hover:bg-[#2b2b37] hover:text-white transition-all whitespace-nowrap shrink-0"
+          >
+            <Tag className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">Tags</span>
           </button>
         </div>
       </div>

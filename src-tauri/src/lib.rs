@@ -54,6 +54,8 @@ pub fn run() {
             commands::collections::add_model_to_collection,
             commands::collections::remove_model_from_collection,
             commands::tags::get_tags,
+            commands::tags::add_tag,
+            commands::tags::delete_tag,
             commands::app::init_db,
             commands::backup::create_backup,
             commands::backup::import_backup,

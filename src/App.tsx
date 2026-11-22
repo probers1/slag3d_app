@@ -7,8 +7,9 @@ import { CollectionsDrawer } from './components/CollectionsDrawer';
 import { UploadModal } from './components/UploadModal';
 import { BackupModal } from './components/BackupModal';
 import { Dropdown } from './components/Dropdown';
-import { apiFetch, apiInitDb } from './utils/api';
+import { apiFetch, apiInitDb, apiGetTags, apiAddTag, apiDeleteTag } from './utils/api';
 import { ModelViewerModal } from './components/ModelViewerModal';
+import { TagsModal } from './components/TagsModal';
 
 export default function App() {
   // Filter and pagination state
@@ -30,6 +31,7 @@ export default function App() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [isTagsOpen, setIsTagsOpen] = useState(false);
 
   // Fetch Collections list
   const fetchCollections = useCallback(async () => {
@@ -216,6 +218,7 @@ export default function App() {
         onTabChange={handleTabChange}
         onOpenUpload={() => setIsUploadOpen(true)}
         onOpenBackup={() => setIsBackupOpen(true)}
+        onOpenTags={() => setIsTagsOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -461,6 +464,15 @@ export default function App() {
             setSelectedModelId(null);
             window.location.reload();
           }}
+        />
+      )}
+
+      {/* Tags Management Modal */}
+      {isTagsOpen && (
+        <TagsModal
+          onClose={() => setIsTagsOpen(false)}
+          onAddTag={(name) => apiAddTag(name)}
+          onDeleteTag={apiDeleteTag}
         />
       )}
 
