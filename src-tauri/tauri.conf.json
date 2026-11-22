@@ -4,6 +4,7 @@
   "version": "0.1.4",
   "identifier": "slag3d",
   "build": {
+    "beforeDevCommand": "npm run dev:client",
     "beforeBuildCommand": "npm run build:client",
     "frontendDist": "../dist",
     "devUrl": "http://localhost:3000"

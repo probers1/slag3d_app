@@ -44,20 +44,17 @@ A local, single-user desktop app for organising 3D printing assets. Built with T
 npm ci
 ```
 
-`npm run tauri dev` does **not** start Vite (there is no `beforeDevCommand`, and `devUrl` is `http://localhost:3000`). Run the two processes in separate terminals:
-
-```bash
-npx vite --port 3000     # frontend
-npm run tauri dev        # native window
-```
+`npm run tauri dev` starts both processes: `beforeDevCommand` runs `npm run dev:client` (Vite on port 3000) and the native window loads `http://localhost:3000`. Use `npm run dev:client` on its own if you only need the frontend in a browser.
 
 ### Verification
 
 ```bash
+npm run typecheck                    # TypeScript check
 npm run build:client                 # frontend build (dist/)
-npx tsc --noEmit                     # TypeScript check
 cd src-tauri && cargo check && cargo test
 ```
+
+CI (`.github/workflows/ci.yml`) runs these checks on pushes to `main` and on pull requests.
 
 ---
 

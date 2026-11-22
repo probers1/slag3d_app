@@ -9,10 +9,11 @@ Tauri v2 desktop app: React 19 + Vite (`src/`) and Rust (`src-tauri/`), single l
 
 ## Commands
 
-- `npm run build:client` → `dist/` (`npm run build` is an alias). This is the only frontend verification script: no lint, typecheck, or test script exists for `src/`.
+- `npm run build:client` → `dist/` (`npm run build` is an alias). `npm run typecheck` runs `tsc --noEmit`. No frontend test or lint script exists.
 - `cd src-tauri && cargo check` and `cargo test` (19 unit tests: migrations, extension allowlist, path traversal, archive/backup round-trips, rollback). Run both after Rust changes.
-- `npm run tauri dev` does **not** start Vite: `tauri.conf.json` has no `beforeDevCommand`, and `devUrl` is `http://localhost:3000` while Vite defaults to 5173. Start Vite on port 3000 (`npx vite --port 3000`) alongside it, or deliberately change the config.
-- `npm run build:desktop` = `sync-version && tauri build`. `scripts/sync-version.js` rewrites committed `package.json` and `tauri.conf.json` versions from the latest `v*` git tag (not `Cargo.toml`), so expect dirty files afterward. CI runs `npm run tauri build` directly, using committed versions.
+- `npm run tauri dev` starts Vite automatically: `beforeDevCommand` runs `npm run dev:client` (`vite --port 3000`) from the repo root, matching `devUrl`. `DISABLE_HMR=true` still disables HMR and watching.
+- `npm run build:desktop` = `sync-version && tauri build`. `scripts/sync-version.js` rewrites committed `package.json`, `tauri.conf.json` and `src-tauri/Cargo.toml` versions from the latest `v*` git tag, so expect dirty files afterward (Cargo refreshes `Cargo.lock` on the next build). CI runs `npm run tauri build` directly, using committed versions.
+- `.github/workflows/ci.yml` runs typecheck, frontend build, `cargo check` and `cargo test` on pushes to `main` and on pull requests.
 - Bundle targets in `tauri.conf.json` are `appimage`, `nsis`, `dmg` (each used only on its own platform); `.deb`/`.msi` are not built. CI builds a universal macOS DMG (`npm run tauri build -- --target universal-apple-darwin`). Output: `src-tauri/target/<target>/release/bundle/`.
 
 ## Architecture that affects edits

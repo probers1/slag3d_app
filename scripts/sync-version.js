@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Sync version from latest git tag to package.json and tauri.conf.json
+// Sync version from latest git tag to package.json, tauri.conf.json and Cargo.toml
 // Usage: node scripts/sync-version.js
 
 import { readFileSync, writeFileSync } from 'fs';
@@ -9,6 +9,7 @@ import { resolve } from 'path';
 const ROOT = resolve(import.meta.dirname, '..');
 const PKG_PATH = resolve(ROOT, 'package.json');
 const TAURI_CONF_PATH = resolve(ROOT, 'src-tauri/tauri.conf.json');
+const CARGO_PATH = resolve(ROOT, 'src-tauri/Cargo.toml');
 
 function getLatestTag() {
   try {
@@ -56,6 +57,20 @@ function updateTauriConf(version) {
   console.log(`Updated tauri.conf.json version to ${version}`);
 }
 
+function updateCargoToml(version) {
+  const cargo = readFileSync(CARGO_PATH, 'utf8');
+  // Only the [package] version belongs to us; dependency versions must stay.
+  const pattern = /(\[package\][\s\S]*?^version\s*=\s*")[^"]+(")/m;
+  if (!pattern.test(cargo)) {
+    console.warn('Could not find [package].version in src-tauri/Cargo.toml');
+    return;
+  }
+  const updated = cargo.replace(pattern, `$1${version}$2`);
+  writeFileSync(CARGO_PATH, updated);
+  console.log(`Updated src-tauri/Cargo.toml version to ${version}`);
+}
+
 const version = getLatestTag();
 updatePackageJson(version);
 updateTauriConf(version);
+updateCargoToml(version);

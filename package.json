@@ -4,8 +4,10 @@
   "version": "0.1.4",
   "type": "module",
   "scripts": {
+    "dev:client": "vite --port 3000",
     "build:client": "vite build",
     "build": "npm run build:client",
+    "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "sync-version": "node scripts/sync-version.js",
     "build:desktop": "npm run sync-version && tauri build"
