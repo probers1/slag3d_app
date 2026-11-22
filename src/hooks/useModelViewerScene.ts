@@ -232,12 +232,17 @@ export function useModelViewerScene(mountRef: RefObject<HTMLDivElement | null>) 
 
       let blobUrl: string | null = null;
       try {
+        // Prefer cached blob from the file object to avoid repeated Tauri IPC fetches.
+        // Falls back to fetching fresh if blob is missing or stale.
+        const ext = activeFile.original_name.split('.').pop()?.toLowerCase();
+
+        // Fetch the blob URL (either cached from before or freshly from Tauri)
         blobUrl = await fetchFileAsBlobUrl(activeFile.file_path);
+
         if (!isCurrent()) {
           if (blobUrl) URL.revokeObjectURL(blobUrl);
           return;
         }
-        const ext = activeFile.original_name.split('.').pop()?.toLowerCase();
 
         if (ext === 'stl') {
           const loader = new STLLoader();
@@ -247,6 +252,11 @@ export function useModelViewerScene(mountRef: RefObject<HTMLDivElement | null>) 
               geometry.computeVertexNormals();
               const mesh = new THREE.Mesh(geometry, material);
               attachAndPosition(mesh, geometry);
+
+              // Cache the raw bytes back onto the file object so subsequent renders reuse it.
+              if (!isCurrent()) return;
+              activeFile.blob = blobUrl;
+
               if (blobUrl) URL.revokeObjectURL(blobUrl);
               blobUrl = null;
             },
@@ -271,6 +281,11 @@ export function useModelViewerScene(mountRef: RefObject<HTMLDivElement | null>) 
                 }
               });
               attachAndPosition(obj);
+
+              // Cache the raw bytes back onto the file object so subsequent renders reuse it.
+              if (!isCurrent()) return;
+              activeFile.blob = blobUrl;
+
               if (blobUrl) URL.revokeObjectURL(blobUrl);
               blobUrl = null;
             },
@@ -295,6 +310,11 @@ export function useModelViewerScene(mountRef: RefObject<HTMLDivElement | null>) 
                 }
               });
               attachAndPosition(group);
+
+              // Cache the raw bytes back onto the file object so subsequent renders reuse it.
+              if (!isCurrent()) return;
+              activeFile.blob = blobUrl;
+
               if (blobUrl) URL.revokeObjectURL(blobUrl);
               blobUrl = null;
             },

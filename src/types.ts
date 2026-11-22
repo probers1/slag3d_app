@@ -20,6 +20,7 @@ export interface ModelFile {
   file_size: number;
   file_path: string;
   is_primary_3d: number;
+  blob?: Blob | URL | string | null; // Cached Tauri read_file result as either a native Blob, blob URL, or plain string
 }
 
 export interface ModelItem {

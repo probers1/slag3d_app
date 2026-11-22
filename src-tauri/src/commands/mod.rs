@@ -23,6 +23,8 @@ pub struct ModelFile {
     pub file_size: u64,
     pub file_path: String,
     pub is_primary_3d: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blob: Option<String>, // Base64-encoded bytes for cached Tauri read_file result
 }
 
 #[derive(Debug, Serialize, Deserialize)]

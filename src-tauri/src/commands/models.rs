@@ -116,7 +116,8 @@ pub async fn get_models(
                 original_name: row.get(13)?,
                 mime_type: row.get(14)?,
                 file_size: row.get(15)?,
-                file_path: row.get(16)?,
+                blob: row.get::<_, Option<String>>(17)?, // Pre-fetched base64 blob
+                file_path: row.get(18)?,
                 is_primary_3d: 1,
             })
         } else {
@@ -186,17 +187,19 @@ pub async fn get_model_detail(
         .collect();
 
     // Files
-    let files: Vec<ModelFile> = conn.prepare("SELECT id, filename, original_name, mime_type, file_size, file_path, is_primary_3d FROM files WHERE model_id = ?")
+    let files: Vec<ModelFile> = conn.prepare("SELECT id, filename, original_name, mime_type, file_size, blob, file_path, is_primary_3d FROM files WHERE model_id = ?")
         .map_err(|e| AppError::from(e.to_string()))?
         .query_map(rusqlite::params![&id], |row| {
+            let blob: Option<String> = row.get::<_, Option<String>>(5).unwrap_or_default(); // Pre-fetched base64 blob (col index 5)
             Ok(ModelFile {
                 id: row.get(0)?,
                 filename: row.get(1)?,
                 original_name: row.get(2)?,
                 mime_type: row.get(3)?,
                 file_size: row.get(4)?,
-                file_path: row.get(5)?,
-                is_primary_3d: row.get(6)?,
+                blob,
+                file_path: row.get(6)?,
+                is_primary_3d: row.get::<_, i32>(7)?,
             })
         })
         .map_err(|e| AppError::from(e.to_string()))?
@@ -517,6 +520,7 @@ pub async fn add_model_files(
                 filename: file.filename.clone(),
                 original_name: file.filename.clone(),
                 mime_type,
+                blob: None, // Will be populated by subsequent read_file call if needed
                 file_size: file.size,
                 file_path: public_path,
                 is_primary_3d: 0,

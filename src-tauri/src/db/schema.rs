@@ -56,6 +56,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             width INTEGER NOT NULL DEFAULT 800,
             height INTEGER NOT NULL DEFAULT 600,
             is_primary_3d INTEGER NOT NULL DEFAULT 0 CHECK(is_primary_3d IN (0,1)),
+            blob TEXT, -- Base64-encoded read_file result for cached thumbnail rendering
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
         );",

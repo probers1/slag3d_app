@@ -55,8 +55,8 @@ fn test_model_delete_cascades_dependent_rows() {
         rusqlite::params!["m1", crate::db::schema::DEFAULT_USER_ID, "Test"],
     ).unwrap();
     conn.execute(
-        "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params!["f1", "m1", "a.stl", "a.stl", "model/stl", 10, "/tmp/a.stl"],
+        "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, blob, file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params!["f1", "m1", "a.stl", "a.stl", "model/stl", 10, "", "/tmp/a.stl"],
     ).unwrap();
     conn.execute(
         "INSERT INTO tags (id, name) VALUES (?1, ?2)",
@@ -111,7 +111,7 @@ fn test_v6_vault_migrates_to_v7_foreign_keys() {
         "CREATE TABLE schema_versions (id INTEGER PRIMARY KEY CHECK(id = 1), version INTEGER NOT NULL UNIQUE, applied_at DATETIME DEFAULT CURRENT_TIMESTAMP);
          CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user','admin')), created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME);
          CREATE TABLE models (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT DEFAULT '', thumbnail_path TEXT, thumbnail_status TEXT NOT NULL CHECK(thumbnail_status IN ('pending','processing','completed','failed')) DEFAULT 'pending', width INTEGER NOT NULL DEFAULT 800, height INTEGER NOT NULL DEFAULT 600, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME);
-         CREATE TABLE files (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, filename TEXT NOT NULL, original_name TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, file_path TEXT NOT NULL, width INTEGER NOT NULL DEFAULT 800, height INTEGER NOT NULL DEFAULT 600, is_primary_3d INTEGER NOT NULL DEFAULT 0 CHECK(is_primary_3d IN (0,1)), created_at DATETIME DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME);
+         CREATE TABLE files (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, filename TEXT NOT NULL, original_name TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, blob TEXT, file_path TEXT NOT NULL, width INTEGER NOT NULL DEFAULT 800, height INTEGER NOT NULL DEFAULT 600, is_primary_3d INTEGER NOT NULL DEFAULT 0 CHECK(is_primary_3d IN (0,1)), created_at DATETIME DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME);
          CREATE TABLE tags (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL COLLATE NOCASE, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
          CREATE TABLE model_tags (model_id TEXT NOT NULL, tag_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (model_id, tag_id));
          CREATE TABLE favorites (user_id TEXT NOT NULL, model_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (user_id, model_id));
@@ -126,8 +126,8 @@ fn test_v6_vault_migrates_to_v7_foreign_keys() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params!["f1", "m1", "a.stl", "a.stl", "model/stl", 10, "/tmp/a.stl"],
+        "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, blob, file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params!["f1", "m1", "a.stl", "a.stl", "model/stl", 10, "", "/tmp/a.stl"],
     )
     .unwrap();
 
