@@ -83,6 +83,7 @@ pub async fn get_models(
                MAX(CASE WHEN f.is_primary_3d = 1 THEN f.original_name END) as primary_original_name,
                MAX(CASE WHEN f.is_primary_3d = 1 THEN f.mime_type END) as primary_mime_type,
                MAX(CASE WHEN f.is_primary_3d = 1 THEN f.file_size END) as primary_file_size,
+               MAX(CASE WHEN f.is_primary_3d = 1 THEN f.blob END) as primary_blob,
                MAX(CASE WHEN f.is_primary_3d = 1 THEN f.file_path END) as primary_file_path,
                EXISTS(SELECT 1 FROM favorites fav WHERE fav.user_id = ? AND fav.model_id = m.id) as is_favorited
         FROM models m
@@ -116,8 +117,8 @@ pub async fn get_models(
                 original_name: row.get(13)?,
                 mime_type: row.get(14)?,
                 file_size: row.get(15)?,
-                blob: row.get::<_, Option<String>>(17)?, // Pre-fetched base64 blob
-                file_path: row.get(18)?,
+                blob: row.get::<_, Option<String>>(16)?, // Pre-fetched base64 blob
+                file_path: row.get(17)?,
                 is_primary_3d: 1,
             })
         } else {
@@ -137,7 +138,7 @@ pub async fn get_models(
             files_count: row.get(9)?,
             tags,
             primary_file,
-            is_favorited: row.get(17)?,
+            is_favorited: row.get(18)?,
         })
     }).map_err(|e| AppError::from(e.to_string()))?;
 
