@@ -116,7 +116,7 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
     let file = fs::File::open(archive_path)?;
     let mut archive = zip::ZipArchive::new(file)?;
 
-    if archive.len() as usize > MAX_ARCHIVE_ENTRIES {
+    if archive.len() > MAX_ARCHIVE_ENTRIES {
         return Err(ArchiveError::TooLarge);
     }
 
