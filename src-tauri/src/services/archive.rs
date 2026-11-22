@@ -9,6 +9,7 @@ pub enum ArchiveError {
     InvalidPath(String),
     UnsupportedFormat,
     NoValidFiles,
+    TooLarge,
     ZipError(zip::result::ZipError),
     SevenZError(sevenz_rust::Error),
 }
@@ -38,6 +39,7 @@ impl std::fmt::Display for ArchiveError {
             ArchiveError::InvalidPath(e) => write!(f, "Invalid path: {}", e),
             ArchiveError::UnsupportedFormat => write!(f, "Unsupported archive format"),
             ArchiveError::NoValidFiles => write!(f, "No valid files in archive"),
+            ArchiveError::TooLarge => write!(f, "Archive contains too many entries or exceeds the size limit"),
             ArchiveError::ZipError(e) => write!(f, "ZIP error: {}", e),
             ArchiveError::SevenZError(e) => write!(f, "7z error: {}", e),
         }
@@ -45,6 +47,12 @@ impl std::fmt::Display for ArchiveError {
 }
 
 impl std::error::Error for ArchiveError {}
+
+/// Maximum number of entries extracted from a single uploaded archive.
+const MAX_ARCHIVE_ENTRIES: usize = 10_000;
+
+/// Maximum number of bytes extracted from a single uploaded archive.
+const MAX_EXTRACTED_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 pub fn is_safe_path(base: &Path, path: &Path) -> bool {
     // Reject any path that climbs above the base via .. components. Do this
@@ -108,7 +116,12 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
     let file = fs::File::open(archive_path)?;
     let mut archive = zip::ZipArchive::new(file)?;
 
+    if archive.len() as usize > MAX_ARCHIVE_ENTRIES {
+        return Err(ArchiveError::TooLarge);
+    }
+
     let mut extracted_files = Vec::new();
+    let mut total_extracted: u64 = 0;
 
     for i in 0..archive.len() {
         let mut file_entry = match archive.by_index(i) {
@@ -148,9 +161,14 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
         };
         let (safe_filename, dest_path) = get_unique_filename(&model_dir, &base_filename.to_string_lossy());
 
-        // Security: prevent path traversal
+        // Reject path traversal
         if !is_safe_path(&model_dir, &dest_path) {
             continue;
+        }
+
+        // Refuse archives that would extract past the size/entry budget.
+        if file_entry.size() > MAX_EXTRACTED_ARCHIVE_BYTES || total_extracted + file_entry.size() > MAX_EXTRACTED_ARCHIVE_BYTES {
+            return Err(ArchiveError::TooLarge);
         }
 
         let mut output_file = match fs::File::create(&dest_path) {
@@ -166,6 +184,7 @@ pub fn extract_zip(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedF
         }
 
         let size = fs::metadata(&dest_path)?.len();
+        total_extracted += size;
         extracted_files.push(ExtractedFile {
             filename: safe_filename,
             destination_path: dest_path,
@@ -187,6 +206,8 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
     let file = fs::File::open(archive_path)?;
 
     let mut filtered_extracted: Vec<ExtractedFile> = Vec::new();
+    let mut extracted_count: usize = 0;
+    let mut total_extracted: u64 = 0;
 
     // sevenz-rust decodes every file in a folder from one shared stream. If a
     // skipped entry isn't drained, the next file in that folder starts at the
@@ -243,6 +264,15 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
                 return Ok(true);
             }
 
+            // Refuse archives that would extract past the size/entry budget.
+            extracted_count += 1;
+            if extracted_count > MAX_ARCHIVE_ENTRIES {
+                return Err(sevenz_rust::Error::Other("archive entry limit exceeded".into()));
+            }
+            if entry.size() > MAX_EXTRACTED_ARCHIVE_BYTES || total_extracted + entry.size() > MAX_EXTRACTED_ARCHIVE_BYTES {
+                return Err(sevenz_rust::Error::Other("archive size limit exceeded".into()));
+            }
+
             // Stream file data directly to disk without buffering the entire file into RAM
             let mut output_file = match fs::File::create(&safe_dest) {
                 Ok(f) => f,
@@ -255,6 +285,7 @@ pub fn extract_7z(archive_path: &Path, model_id: &str) -> Result<Vec<ExtractedFi
 
             match std::io::copy(reader, &mut output_file) {
                 Ok(size) => {
+                    total_extracted += size;
                     filtered_extracted.push(ExtractedFile {
                         filename: safe_filename,
                         destination_path: safe_dest.clone(),
@@ -283,9 +314,49 @@ mod tests {
     use super::*;
     use sevenz_rust::{SevenZArchiveEntry, SevenZWriter};
     use std::path::PathBuf;
+    use std::io::Write;
+    use std::sync::{Mutex, MutexGuard};
+
+    // extract_zip/extract_7z resolve their destination through the
+    // SLAG3D_APP_DATA_DIR env var, and tests in this module run in parallel.
+    // Serialize the ones that touch it.
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap()
+    }
+
+    #[test]
+    fn extract_zip_rejects_archive_over_entry_limit() {
+        let _guard = env_lock();
+        let root = std::env::temp_dir().join(format!(
+            "slag3d-zip-limit-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        std::env::set_var("SLAG3D_APP_DATA_DIR", &root);
+
+        let archive = root.join("big.zip");
+        {
+            let file = fs::File::create(&archive).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            for i in 0..=10_000 {
+                zip.start_file(format!("file_{}.stl", i), zip::write::FileOptions::default())
+                    .unwrap();
+                zip.write_all(b"solid x\nendsolid x\n").unwrap();
+            }
+            zip.finish().unwrap();
+        }
+
+        let result = extract_zip(&archive, "test-model");
+        std::env::remove_var("SLAG3D_APP_DATA_DIR");
+
+        assert!(matches!(result, Err(ArchiveError::TooLarge)));
+        fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn extract_7z_skips_disallowed_entries_and_keeps_later_models() {
+        let _guard = env_lock();
         let root = std::env::temp_dir().join(format!(
             "slag3d-7z-skip-{}",
             uuid::Uuid::new_v4()
