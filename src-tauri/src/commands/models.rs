@@ -604,19 +604,11 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
         staged_thumb = Some(dest);
     }
 
-    // Delete database record. The Tauri schema declares `files.model_id`
-    // etc. without REFERENCES, so SQLite won't cascade — clean up the
-    // dependents explicitly or they'd orphan.
+    // Delete database record. Migration v7 added `FOREIGN KEY ... ON DELETE
+    // CASCADE` from files/model_tags/favorites/collection_models to models, so
+    // deleting the model row cascades to the dependents within this transaction.
     let delete_result = (|| -> Result<(), String> {
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM model_tags WHERE model_id = ?", rusqlite::params![&id])
-            .map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM favorites WHERE model_id = ?", rusqlite::params![&id])
-            .map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM collection_models WHERE model_id = ?", rusqlite::params![&id])
-            .map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM files WHERE model_id = ?", rusqlite::params![&id])
-            .map_err(|e| e.to_string())?;
         tx.execute("DELETE FROM models WHERE id = ?", rusqlite::params![&id])
             .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())
