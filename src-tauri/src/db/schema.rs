@@ -159,10 +159,21 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
     // in individual commands (delete_model, delete_collection, ...).
     migrate_foreign_keys(conn)?;
 
-    // Set schema version to 7 (upsert)
+    // Migration v8: add blob column to files table for caching read_file results
+    // in the viewer. This avoids repeated Tauri IPC fetches when re-rendering
+    // the same model.
+    let mut stmt = conn.prepare("PRAGMA table_info(files)")?;
+    let names: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if !names.iter().any(|c| c == "blob") {
+        conn.execute_batch("ALTER TABLE files ADD COLUMN blob TEXT")?;
+    }
+
+    // Set schema version to 8 (upsert)
     conn.execute_batch(
-        "INSERT INTO schema_versions (id, version) VALUES (1, 7)
-         ON CONFLICT(id) DO UPDATE SET version = 7;",
+        "INSERT INTO schema_versions (id, version) VALUES (1, 8)
+         ON CONFLICT(id) DO UPDATE SET version = 8;",
     )?;
 
     Ok(())

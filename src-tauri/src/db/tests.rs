@@ -5,7 +5,7 @@ fn test_db_init_and_migrations() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     init_schema(&conn).unwrap();
     let version: i32 = conn.query_row("SELECT version FROM schema_versions WHERE id = 1", [], |r| r.get(0)).unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn test_v6_vault_migrates_to_v7_foreign_keys() {
         "CREATE TABLE schema_versions (id INTEGER PRIMARY KEY CHECK(id = 1), version INTEGER NOT NULL UNIQUE, applied_at DATETIME DEFAULT CURRENT_TIMESTAMP);
          CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user','admin')), created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME);
          CREATE TABLE models (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT DEFAULT '', thumbnail_path TEXT, thumbnail_status TEXT NOT NULL CHECK(thumbnail_status IN ('pending','processing','completed','failed')) DEFAULT 'pending', width INTEGER NOT NULL DEFAULT 800, height INTEGER NOT NULL DEFAULT 600, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME);
-         CREATE TABLE files (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, filename TEXT NOT NULL, original_name TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, blob TEXT, file_path TEXT NOT NULL, width INTEGER NOT NULL DEFAULT 800, height INTEGER NOT NULL DEFAULT 600, is_primary_3d INTEGER NOT NULL DEFAULT 0 CHECK(is_primary_3d IN (0,1)), created_at DATETIME DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME);
+         CREATE TABLE files (id TEXT PRIMARY KEY, model_id TEXT NOT NULL, filename TEXT NOT NULL, original_name TEXT NOT NULL, mime_type TEXT NOT NULL, file_size INTEGER NOT NULL, file_path TEXT NOT NULL, width INTEGER NOT NULL DEFAULT 800, height INTEGER NOT NULL DEFAULT 600, is_primary_3d INTEGER NOT NULL DEFAULT 0 CHECK(is_primary_3d IN (0,1)), created_at DATETIME DEFAULT CURRENT_TIMESTAMP, is_deleted INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME);
          CREATE TABLE tags (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL COLLATE NOCASE, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
          CREATE TABLE model_tags (model_id TEXT NOT NULL, tag_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (model_id, tag_id));
          CREATE TABLE favorites (user_id TEXT NOT NULL, model_id TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (user_id, model_id));
@@ -126,15 +126,15 @@ fn test_v6_vault_migrates_to_v7_foreign_keys() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, blob, file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params!["f1", "m1", "a.stl", "a.stl", "model/stl", 10, "", "/tmp/a.stl"],
+        "INSERT INTO files (id, model_id, filename, original_name, mime_type, file_size, file_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params!["f1", "m1", "a.stl", "a.stl", "model/stl", 10, "/tmp/a.stl"],
     )
     .unwrap();
 
     init_schema(&conn).unwrap();
 
     let version: i32 = conn.query_row("SELECT version FROM schema_versions WHERE id = 1", [], |r| r.get(0)).unwrap();
-    assert_eq!(version, 7);
+    assert_eq!(version, 8);
 
     // The migration must keep the data intact while adding the FK.
     let (title, file_id): (String, String) = conn
@@ -146,5 +146,14 @@ fn test_v6_vault_migrates_to_v7_foreign_keys() {
         .unwrap();
     assert_eq!(title, "Legacy");
     assert_eq!(file_id, "f1");
+
+    // Verify the blob column was added by migration v8
+    let has_blob: bool = conn
+        .prepare("PRAGMA table_info(files)")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .any(|name| name.unwrap() == "blob");
+    assert!(has_blob, "migration v8 should add blob column to files table");
 }
 
